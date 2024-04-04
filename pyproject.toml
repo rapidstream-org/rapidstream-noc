@@ -1,0 +1,195 @@
+# Copyright (c) 2024 RapidStream Design Automation, Inc. and contributors.
+# All rights reserved. The contributor(s) of this file has/have agreed to the
+# RapidStream Contributor License Agreement.
+
+###########
+#  Build  #
+###########
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+##################
+#  Dependencies  #
+##################
+
+
+[tool.poetry]
+name = "rapidstream-dse"
+version = "0.0.1"
+description = "RapidStream DSE Engine"
+authors = ["RapidStream Design Automation, Inc. <info@rapidstream-da.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.3.0"
+flake8 = "^7.0.0"
+flake8-2020 = "^1.8.1"
+flake8-absolute-import = "^1.0.0.2"
+flake8-alfred = "^1.1.1"
+flake8-black = "^0.3.6"
+flake8-bugbear = "^24.2.6"
+flake8-comprehensions = "^3.14.0"
+flake8-datetime-utcnow-plugin = "^0.1.2"
+flake8-datetimez = "^20.10.0"
+flake8-docstrings = "^1.7.0"
+flake8-functions-names = "^0.4.0"
+flake8-logging-format = "^0.9.0"
+flake8-noqa = "^1.4.0"
+flake8-pep3101 = "^2.1.0"
+flake8-pep585 = "^0.1.7"
+flake8-pyproject = "^1.2.3"
+flake8-pytest-style = "^1.7.2"
+flake8-simplify = "^0.21.0"
+flake8-tidy-imports = "^4.10.0"
+flake8-use-fstring = "^1.4"
+flake8-useless-assert = "^0.4.4"
+flake8-warnings = "^0.4.0"
+mypy = "^1.9.0"
+pre-commit = "^3.7.0"
+pylint = "^3.1.0"
+setuptools = "^69.2.0"
+
+
+################
+#  Formatting  #
+###############
+
+
+[tool.autoflake]
+exclude = "*_workaround.py"
+expand-star-imports = true
+ignore-init-module-imports = false
+remove-all-unused-imports = true
+remove-duplicate-keys = true
+remove-unused-variables = true
+
+
+[tool.black]
+preview = true
+target-version = ["py310"]
+
+
+[tool.codespell]
+
+# 'Implmentation' is intended here as it is a typo by Xilinx and we have conform lol
+ignore-words-list = "din,dout,edn,inout,pres,implmentation"
+
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:"
+]
+
+
+[tool.doc8]
+max-line-length = 88
+
+
+[tool.flake8]
+doctests = true
+docstring-convention = "google"
+exclude = "*_workaround.py"
+max-line-length = 88  # for compatibility with black
+
+# Justification for ---ignoring--- and +++selecting+++ the following warnings:
+# +B902: invalid first argument for super()
+# +B903: use collections.namedtuple
+# +B905: zip() without an explicit strict= parameter set
+# +B950: line too long
+# -C408: unnecessary dict call             -  not very useful
+# -D202: no blank lines after docstring    -  may compete with black
+# -E203: whitespace before ':'             -  not PEP8 compliant
+# -E222: multiple spaces after operator    -  may be used for line alignments
+# -E501: line too long                     -  use B950 instead
+# -FNE004: name uses "load" not "from"     -  not very useful
+# -FNE007: name has "and"                  -  not very useful
+# -FNE008: name has its first argument     -  not very useful
+# -PT011: pytest.raises is too broad       -  not very useful
+# -S001: found modulo formatter            -  false positive
+# -W503: line break before binary operator -  may compete with black
+# -SIM102: Use a single if-statement instead of nested if-statements
+extend-select = "B902,B903,B905,B950"
+ignore = "C408,D202,E203,E222,E501,FNE004,FNE007,FNE008,PT011,S001,W503,BLK100,SIM102"
+
+
+[tool.isort]
+profile = "black"
+py_version = 310
+
+
+[tool.mypy]
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+no_implicit_reexport = true
+strict = true
+strict_concatenate = true
+strict_equality = true
+strict_optional = true
+warn_no_return = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+warn_return_any = true
+warn_unreachable = true
+
+
+[tool.pydocstyle]
+
+# Justification for ---ignoring--- and +++selecting+++ the following warnings:
+# -D202: no blank lines after docstring    -  may compete with black
+add-ignore = "D202"
+convention = "google"
+
+
+[tool.pylint]
+
+# Show all warnings except those disabled
+confidence = ""
+
+# Justification for ---ignoring--- the following warnings:
+# -C0301: line-too-long                    -  use flake8 B950 instead
+# -R0801: similar-lines                    -  too annoying to be useful
+# -R2044: empty-comment                    -  may be used for layout
+# -C0198: Bad docstring quotes in function -  often false warning
+# -R0901: too-many-ancestors               -  it is not a problem
+disable = "C0301,R0801,R2044,C0198,R0901"
+
+# Allow short names to be used for variables
+good-names-rgxs = "^..?$"
+
+# Enable the following extensions
+load-plugins = [
+    "pylint.extensions.bad_builtin",
+    "pylint.extensions.code_style",
+    "pylint.extensions.confusing_elif",
+    "pylint.extensions.consider_refactoring_into_while_condition",
+    "pylint.extensions.consider_ternary_expression",
+    "pylint.extensions.dict_init_mutate",
+    "pylint.extensions.docparams",
+    "pylint.extensions.docstyle",
+    "pylint.extensions.dunder",
+    "pylint.extensions.empty_comment",
+    "pylint.extensions.eq_without_hash",
+    "pylint.extensions.for_any_all",
+    "pylint.extensions.magic_value",
+    "pylint.extensions.overlapping_exceptions",
+    "pylint.extensions.private_import",
+    "pylint.extensions.redefined_loop_name",
+    "pylint.extensions.redefined_variable_type",
+    "pylint.extensions.set_membership",
+]

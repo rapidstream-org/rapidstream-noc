@@ -1,0 +1,163 @@
+# Copyright (c) 2024 RapidStream Design Automation, Inc. and contributors.
+# All rights reserved. The contributor(s) of this file has/have agreed to the
+# RapidStream Contributor License Agreement.
+
+repos:
+  ########################
+  # Upgrade Dependencies #
+  ########################
+
+  - repo: https://github.com/python-poetry/poetry
+    rev: 1.8.0
+    hooks:
+      - id: poetry-check
+      - id: poetry-install
+
+  ############################
+  #  Built-in Common Checks  #
+  ############################
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-added-large-files
+        args:
+          - --maxkb=1024
+      - id: check-ast
+      - id: check-builtin-literals
+      - id: check-case-conflict
+      - id: check-docstring-first
+      - id: check-executables-have-shebangs
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-vcs-permalinks
+      - id: check-xml
+      - id: check-yaml
+      - id: debug-statements
+      - id: destroyed-symlinks
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
+      - id: forbid-new-submodules
+      - id: forbid-submodules
+      - id: mixed-line-ending
+      - id: pretty-format-json
+        args:
+          - --autofix
+          - --indent=4
+      - id: trailing-whitespace
+
+  #####################
+  #  Auto Formatting  #
+  #####################
+
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.3.1
+    hooks:
+      - id: autoflake
+
+  - repo: https://github.com/psf/black
+    rev: 24.3.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/keewis/blackdoc
+    rev: v0.3.9
+    hooks:
+      - id: blackdoc
+        additional_dependencies: [black==23.11.0]
+
+  - repo: https://github.com/adamchainz/blacken-docs
+    rev: 1.16.0
+    hooks:
+      - id: blacken-docs
+        additional_dependencies: [black==23.11.0]
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+
+  - repo: https://github.com/aio-libs/sort-all
+    rev: v1.2.0
+    hooks:
+      - id: sort-all
+
+  - repo: https://github.com/MarcoGorelli/absolufy-imports
+    rev: v0.3.1
+    hooks:
+      - id: absolufy-imports
+
+  #############
+  #  Linting  #
+  #############
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: "v2.2.6"
+    hooks:
+      - id: codespell
+        types_or: [asciidoc, python, markdown, rst]
+        additional_dependencies: [tomli]
+
+  - repo: https://github.com/PyCQA/doc8
+    rev: v1.1.1
+    hooks:
+      - id: doc8
+
+  - repo: local
+    hooks:
+      - id: flake8
+        name: flake8
+        entry: poetry run flake8
+        language: system
+        types: [python]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: poetry run mypy
+        language: system
+        types: [python]
+
+  - repo: https://github.com/PyCQA/pydocstyle
+    rev: 6.3.0
+    hooks:
+      - id: pydocstyle
+        additional_dependencies: [tomli]
+
+  - repo: local
+    hooks:
+      - id: pylint
+        name: pylint
+        entry: poetry run python -m pylint
+        language: system
+        types: [python]
+        args:
+          - -rn
+          - -sn
+          - --notes=''
+
+  ###############
+  #  Copyright  #
+  ###############
+
+  - repo: https://github.com/google/pre-commit-tool-hooks
+    rev: v1.2.4
+    hooks:
+      - id: check-links
+      - id: check-copyright
+        args:
+          - --copyright
+          - |+
+            Copyright (c) 2024 RapidStream Design Automation, Inc. and contributors.
+            All rights reserved. The contributor(s) of this file has/have agreed to the
+            RapidStream Contributor License Agreement.
+          - --skip_pattern
+          - "(?:\
+            ^LICENSE|\
+            \\.(?:ico|json|v|sv|vhd|bin|tcl|rst|xci|xml|csv|rpt|bd|ini|ipynb|lock|gitignore)\
+            )$"
