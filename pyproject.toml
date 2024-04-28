@@ -25,6 +25,8 @@ authors = ["RapidStream Design Automation, Inc. <info@rapidstream-da.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
+pydantic = "^2.7.1"
+networkx = "^3.3"
 
 [tool.poetry.group.dev]
 optional = true
@@ -57,12 +59,16 @@ mypy = "^1.9.0"
 pre-commit = "^3.7.0"
 pylint = "^3.1.0"
 setuptools = "^69.2.0"
+pytest = "^8.1.1"
 
 
 ################
 #  Formatting  #
 ###############
 
+
+[tool.pytest.ini_options]
+addopts = "--doctest-modules"
 
 [tool.autoflake]
 exclude = "*_workaround.py"
@@ -81,7 +87,7 @@ target-version = ["py310"]
 [tool.codespell]
 
 # 'Implmentation' is intended here as it is a typo by Xilinx and we have conform lol
-ignore-words-list = "din,dout,edn,inout,pres,implmentation"
+ignore-words-list = "din,dout,edn,inout,pres,implmentation,cips"
 
 
 [tool.coverage.report]
