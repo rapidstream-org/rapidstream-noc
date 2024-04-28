@@ -301,7 +301,7 @@ connect_bd_intf_net -intf_net smartconnect_0_M00_AXI \
 connect_bd_net -net microblaze_0_Clk [get_bd_pins sim_clk_gen_1/clk] \
     [get_bd_pins axi_noc_0/aclk0] [get_bd_pins rst_clk_wiz_100M/slowest_sync_clk] \
     [get_bd_pins microblaze_0/Clk] [get_bd_pins microblaze_0_local_memory/LMB_Clk] \
-    [get_bd_pins smartconnect_0/aclk] [get_bd_pins axis_noc_0/aclk0]
+    [get_bd_pins smartconnect_0/aclk]
 connect_bd_net -net rst_clk_wiz_100M_bus_struct_reset \
     [get_bd_pins rst_clk_wiz_100M/bus_struct_reset] \
     [get_bd_pins microblaze_0_local_memory/SYS_Rst]
@@ -410,7 +410,7 @@ set_property CONFIG.ASSOCIATED_BUSIF [concat_axi_pins $axis_noc_dut] \
             noc_s_port = f"S{i:02d}_AXIS"
             tcl += [
                 f"set_property -dict [list CONFIG.CONNECTIONS {{{noc_m_port} \
-                    {{ write_bw {{500}} write_avg_burst {{4}}}}}}] \
+                    {{ write_bw {{16000}} write_avg_burst {{4}}}}}}] \
                     [get_bd_intf_pins /axis_noc_dut/{noc_s_port}]"
             ]
             tcl += [
