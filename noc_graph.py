@@ -66,6 +66,20 @@ class NocGraph(BaseModel):
         all_nodes += [n.name for row in self.ncrb_nodes for n in row]
         return all_nodes
 
+    def get_all_nmu_nodes(self) -> list[str]:
+        """Get a list of all nmu_nodes' names.
+
+        Returns a list of strings.
+        """
+        return [n.name for row in self.nmu_nodes for n in row]
+
+    def get_all_nsu_nodes(self) -> list[str]:
+        """Get a list of all nsu_nodes' names.
+
+        Returns a list of strings.
+        """
+        return [n.name for row in self.nsu_nodes for n in row]
+
     def get_all_edges(self) -> list[tuple[str, str]]:
         """Get a list of all edges without attributes.
 
