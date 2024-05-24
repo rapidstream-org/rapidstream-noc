@@ -6,6 +6,8 @@ All rights reserved. The contributor(s) of this file has/have agreed to the
 RapidStream Contributor License Agreement.
 """
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -20,12 +22,15 @@ class Edge(BaseModel):
 
     src: Node
     dest: Node
-    bandwidth: int
+    bandwidth: float
 
 
 class NocGraph(BaseModel):
     """Represents a NoC graph.
 
+    num_slr: number of slr
+    num_col: number of vertical NoC
+    rows_per_slr: number of NMU <-> NSU rows per SLR
     nmu_nodes: 2d array of all NMU nodes. Indexing follows Vivado.
     nsu_nodes: 2d array of all NSU nodes. Indexing follows Vivado.
     nps_vnoc_nodes: 2d array of all NPS nodes connected to NMUs and NSUs.
@@ -35,6 +40,10 @@ class NocGraph(BaseModel):
     ncrb_nodes: 2d array of all NCRB nodes for east-west communication.
     """
 
+    num_slr: int
+    num_col: int
+    rows_per_slr: list[int]
+
     nmu_nodes: list[list[Node]]
     nsu_nodes: list[list[Node]]
     nps_vnoc_nodes: list[list[Node]]
@@ -42,6 +51,11 @@ class NocGraph(BaseModel):
     nps_slr0_nodes: list[Node]
     ncrb_nodes: list[list[Node]]
     edges: list[Edge]
+
+    def __init__(self, **data: Any) -> None:
+        """Initialize class."""
+        super().__init__(**data)
+        assert self.num_slr == len(self.rows_per_slr), "Invalid class attributes!"
 
     def add_edge(self, edge: Edge) -> None:
         """Add an edge."""

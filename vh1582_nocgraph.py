@@ -1,4 +1,4 @@
-"""Generates NoC graphs for FPGA devices."""
+"""Generates NoC graphs for VH1582."""
 
 __copyright__ = """
 Copyright (c) 2024 RapidStream Design Automation, Inc. and contributors.
@@ -12,17 +12,18 @@ from typing import Any
 from noc_graph import Edge, NocGraph, Node
 
 
-def vp1802_nodes(
+def vh1582_nodes(
     num_slr: int, num_col: int, rows_per_slr: list[int]
 ) -> dict[str, list[Any]]:
-    """Creates all vp1802 NoC's nodes.
+    """Creates all vh1582 NoC's nodes.
 
     Returns a dictionary of all node types in the NocGraph.
     """
     num_row = sum(rows_per_slr)
     # each slr has two top and two bottom rows
-    # except for slr0 which only has two top rows
-    num_inter_rows = num_slr * 2 * 2 - 2
+    # except for bot slr which only has two top rows
+    # except for top slr in hbm boards
+    num_inter_rows = num_slr * 2 * 2 - 2 - 2
 
     all_nodes: dict[str, list[Any]] = {
         "nmu_nodes": [],
@@ -143,7 +144,7 @@ def create_nps_hnoc_edges(G: NocGraph, num_slr: int, num_col: int) -> list[Edge]
     edges = []
 
     y = 7
-    for slr in range(num_slr):
+    for slr in range(num_slr - 1):
         for r in range(2):
             for x in range(num_col):
                 # connect top interconnect nps nodes to vnoc nps nodes
@@ -186,35 +187,35 @@ def create_ncrb_edges(G: NocGraph, num_slr: int, num_col: int) -> list[Edge]:
     """
     edges = []
 
-    for y in range(num_slr * 2 - 1):
+    for y in range(num_slr * 2 - 2):
         for x in range(num_col - 1):
             # west direction
             edges.append(
                 Edge(
                     src=G.ncrb_nodes[x][y * 2],
                     dest=G.nps_hnoc_nodes[x][y * 2],
-                    bandwidth=16000,  # 11500,
+                    bandwidth=16000,
                 )
             )
             edges.append(
                 Edge(
                     src=G.ncrb_nodes[x][y * 2],
                     dest=G.nps_hnoc_nodes[x][y * 2 + 1],
-                    bandwidth=16000,  # 11500,
+                    bandwidth=16000,
                 )
             )
             edges.append(
                 Edge(
                     src=G.nps_hnoc_nodes[x + 1][y * 2],
                     dest=G.ncrb_nodes[x][y * 2],
-                    bandwidth=16000,  # 11500,
+                    bandwidth=16000,
                 )
             )
             edges.append(
                 Edge(
                     src=G.nps_hnoc_nodes[x + 1][y * 2 + 1],
                     dest=G.ncrb_nodes[x][y * 2],
-                    bandwidth=16000,  # 11500,
+                    bandwidth=16000,
                 )
             )
             # print(f"ncrb_x{x}y{y*2} -> nps_x{x}y{y*2}")
@@ -227,28 +228,28 @@ def create_ncrb_edges(G: NocGraph, num_slr: int, num_col: int) -> list[Edge]:
                 Edge(
                     src=G.nps_hnoc_nodes[x][y * 2],
                     dest=G.ncrb_nodes[x][y * 2 + 1],
-                    bandwidth=16000,  # 11500,
+                    bandwidth=16000,
                 )
             )
             edges.append(
                 Edge(
                     src=G.nps_hnoc_nodes[x][y * 2 + 1],
                     dest=G.ncrb_nodes[x][y * 2 + 1],
-                    bandwidth=16000,  # 11500,
+                    bandwidth=16000,
                 )
             )
             edges.append(
                 Edge(
                     src=G.ncrb_nodes[x][y * 2 + 1],
                     dest=G.nps_hnoc_nodes[x + 1][y * 2],
-                    bandwidth=16000,  # 11500,
+                    bandwidth=16000,
                 )
             )
             edges.append(
                 Edge(
                     src=G.ncrb_nodes[x][y * 2 + 1],
                     dest=G.nps_hnoc_nodes[x + 1][y * 2 + 1],
-                    bandwidth=16000,  # 11500,
+                    bandwidth=16000,
                 )
             )
             # print(f"nps_x{x}y{y*2} -> ncrb_x{x}y{y*2+1}")
@@ -292,10 +293,10 @@ def create_nps_slr0_edges(G: NocGraph, num_col: int) -> list[Edge]:
     return edges
 
 
-def vp1802_edges(
+def vh1582_edges(
     G: NocGraph, num_slr: int, num_col: int, rows_per_slr: list[int]
 ) -> list[Edge]:
-    """Creates all vp1802 NoC's edges.
+    """Creates all vh1582 NoC's edges.
 
     Returns a list of all edges.
     """
@@ -309,12 +310,12 @@ def vp1802_edges(
     return edges
 
 
-def vp1802_nocgraph() -> NocGraph:
-    """Generates VP1802's NoC graph.
+def vh1582_nocgraph() -> NocGraph:
+    """Generates vh1582's NoC graph.
 
     Example:
     >>> import networkx as nx
-    >>> G = vp1802_nocgraph()
+    >>> G = vh1582_nocgraph()
     >>> nx_g = nx.DiGraph()
     >>> nx_g.add_nodes_from(G.get_all_nodes())
     >>> nx_g.add_edges_from(G.get_all_edges())
@@ -325,10 +326,10 @@ def vp1802_nocgraph() -> NocGraph:
         'nps_vnoc_x1y0', 'nsu_x1y0']
     """
 
-    num_slr = 4
+    num_slr = 2
     num_col = 4
-    rows_per_slr = [7, 6, 6, 6]
-    nodes = vp1802_nodes(num_slr, num_col, rows_per_slr)
+    rows_per_slr = [7, 6]
+    nodes = vh1582_nodes(num_slr, num_col, rows_per_slr)
 
     # Create a directed graph
     G = NocGraph(
@@ -344,7 +345,7 @@ def vp1802_nocgraph() -> NocGraph:
         edges=[],
     )
 
-    edges = vp1802_edges(G, num_slr, num_col, rows_per_slr)
+    edges = vh1582_edges(G, num_slr, num_col, rows_per_slr)
     G.add_edges(edges)
 
     return G
