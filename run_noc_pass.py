@@ -68,6 +68,7 @@ Please provide:
     # currently hard-coded parameters
     FREQUENCY = 250.0
     HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/serpens_hbm24_nasa4704.mem"
+    TB_FILE = "/home/jakeke/rapidstream-noc/serpens_tb_a48.sv"
 
     # intermediate dumps
     BD_NAME = "top_arm"
@@ -232,6 +233,7 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
                 "board_part": D.board_part,
                 "bd_name": BD_NAME,
                 "rtl_dir": RTL_FOLDER,
+                "tb_file": TB_FILE,
                 "constraint": CONSTRAINT_TCL,
                 "bd_tcl": VIVADO_BD_TCL,
                 "noc_tcl": NOC_CONSTRAINT_TCL,

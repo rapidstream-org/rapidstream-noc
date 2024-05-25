@@ -75,6 +75,7 @@ def gen_vivado_prj_tcl(vivado_prj_params: dict[str, str]) -> list[str]:
     board_part = vivado_prj_params["board_part"]
     bd_name = vivado_prj_params["bd_name"]
     rtl_dir = vivado_prj_params["rtl_dir"]
+    tb_file = vivado_prj_params["tb_file"]
     constraint = vivado_prj_params["constraint"]
     bd_tcl = vivado_prj_params["bd_tcl"]
     noc_tcl = vivado_prj_params["noc_tcl"]
@@ -107,7 +108,7 @@ import_ips_from_dir {build_dir}/{rtl_dir}
 import_files {build_dir}/{rtl_dir}
 
 set_property SOURCE_SET sources_1 [get_filesets sim_1]
-add_files -fileset sim_1 -norecurse /home/jakeke/rapidstream-noc/serpens_tb_a48.sv
+add_files -fileset sim_1 -norecurse {tb_file}
 set_property top tb [get_filesets sim_1]
 set_property top_lib xil_defaultlib [get_filesets sim_1]
 update_compile_order -fileset sim_1
