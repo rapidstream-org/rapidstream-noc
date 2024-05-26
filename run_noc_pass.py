@@ -7,6 +7,7 @@ RapidStream Contributor License Agreement.
 """
 
 import json
+import os
 import subprocess
 import sys
 from enum import Enum, auto
@@ -67,8 +68,8 @@ Please provide:
 
     # currently hard-coded parameters
     FREQUENCY = 250.0
-    HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/serpens_hbm24_nasa4704.mem"
-    TB_FILE = "/home/jakeke/rapidstream-noc/serpens_tb_a48.sv"
+    HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm24_nasa4704.mem"
+    TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48.sv"
 
     # intermediate dumps
     BD_NAME = "top_arm"
@@ -128,13 +129,16 @@ Please provide:
     )
 
     if build_dir != "":
-        zsh_cmds = f"""
-[ -d {build_dir} ] && rm -rf {build_dir}
+        if os.path.exists(build_dir):
+            print(f"The folder '{build_dir}' already exists. Aborting.")
+            sys.exit(1)
+        else:
+            zsh_cmds = f"""
 mkdir {build_dir}
 cp {rapidstream_json} {build_dir}/
 """
-        print(zsh_cmds)
-        subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+            print(zsh_cmds)
+            subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
     # Main algorithm: select streams for NoC
     if selector == SelectorEnum.EMPTY.name:
