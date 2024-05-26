@@ -130,11 +130,10 @@ def greedy_selector(
     for s, slots in streams_slots.items():
         slots_usage = get_streams_noc_area(selected_streams | {s: slots}, device)
 
-        if is_exceeding_avail_noc_nodes(slots_usage, device):
-            break
-        selected_streams.update({s: slots})
+        if not is_exceeding_avail_noc_nodes(slots_usage, device):
+            selected_streams.update({s: slots})
     print(f"greedy selector has selected {len(selected_streams)} streams.")
-    print("slot usage", slots_usage)
+    print("slot usage", get_streams_noc_area(selected_streams, device))
     return list(selected_streams.keys())
 
 
