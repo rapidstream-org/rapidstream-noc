@@ -149,7 +149,7 @@ def create_nps_hnoc_edges(G: NocGraph, num_slr: int, num_col: int) -> list[Edge]
             for x in range(num_col):
                 # connect top interconnect nps nodes to vnoc nps nodes
                 edges += create_bidir_edges(
-                    G.nps_hnoc_nodes[x][slr * 4 + r],
+                    G.nps_hnoc_nodes[x][slr * 4 + (1 - r)],
                     G.nps_vnoc_nodes[x][y * 2 - 2 + r],
                     bandwidth=16000,
                 )
@@ -158,7 +158,7 @@ def create_nps_hnoc_edges(G: NocGraph, num_slr: int, num_col: int) -> list[Edge]
                 # connect lower interconnect nps nodes to vnoc nps nodes
                 if slr < num_slr - 1:
                     edges += create_bidir_edges(
-                        G.nps_hnoc_nodes[x][slr * 4 + 2 + r],
+                        G.nps_hnoc_nodes[x][slr * 4 + 2 + (1 - r)],
                         G.nps_vnoc_nodes[x][y * 2 + r],
                         bandwidth=16000,
                     )
