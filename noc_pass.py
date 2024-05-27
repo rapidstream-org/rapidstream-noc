@@ -14,7 +14,7 @@ from pulp import GUROBI_CMD, LpMinimize, LpProblem, LpVariable, lpSum
 from pydantic import BaseModel, ConfigDict
 
 from device import Device
-from ir_helper import extract_slot_range
+from ir_helper import extract_slot_coord, extract_slot_range
 from tcl_helper import print_noc_loc_tcl
 
 
@@ -163,6 +163,60 @@ def get_slot_to_noc_nodes(
             "dest": get_slot_nodes(slots["dest"], "nsu", device),
         }
     return streams_nodes
+
+
+def get_stream_manhattan_dist(
+    streams_slots: dict[str, dict[str, str]],
+) -> dict[str, int]:
+    """Calculates the minimum number of boundaries each stream crosses.
+
+    Uses Manhattan distance abs(dest_x - src_x) + abs(dest_y - src_y).
+
+    Returns a dictionary of {stream_name: num_boundaries_crossed}.
+
+    Example:
+    >>> get_stream_manhattan_dist(
+    ...     {
+    ...         "s1": {"src": "SLOT_X0Y0", "dest": "SLOT_X3Y2"},
+    ...         "s2": {"src": "SLOT_X4Y8", "dest": "SLOT_X2Y4"},
+    ...     }
+    ... )
+    {'s1': 5, 's2': 6}
+    """
+    streams_boundaries: dict[str, int] = {}
+    for stream_name, slots in streams_slots.items():
+        # assumes the two slots are the same
+        src_x, src_y = extract_slot_coord(slots["src"].split("_TO_")[0])
+        dest_x, dest_y = extract_slot_coord(slots["dest"].split("_TO_")[0])
+        # using Manhattan distance
+        streams_boundaries[stream_name] = abs(dest_x - src_x) + abs(dest_y - src_y)
+    return streams_boundaries
+
+
+def get_stream_manhattan_bw(
+    streams_slots: dict[str, dict[str, str]], streams_bw: dict[str, float]
+) -> dict[str, float]:
+    """Calculates the Manhattan bandwidth of each stream.
+
+    Returns the modified dictionary.
+
+    Example:
+    >>> get_stream_manhattan_bw(
+    ...     {
+    ...         "s1": {"src": "SLOT_X0Y0", "dest": "SLOT_X3Y2"},
+    ...         "s2": {"src": "SLOT_X4Y8", "dest": "SLOT_X2Y4"},
+    ...     },
+    ...     {
+    ...         "s1": 1000.0,
+    ...         "s2": 16000.0,
+    ...     },
+    ... )
+    {'s1': 5000.0, 's2': 96000.0}
+    """
+    streams_manhattan = get_stream_manhattan_dist(streams_slots)
+    for stream_name, bw in streams_bw.items():
+        streams_bw[stream_name] = bw * streams_manhattan[stream_name]
+    return streams_bw
 
 
 def get_nx_graph_from_noc_graph(device: Device) -> nx.DiGraph:
@@ -432,9 +486,10 @@ def ilp_noc_selector(
     ilp_noc_selector_add_constr(m, ilp_var, streams_nodes, streams_bw, device)
 
     # Objective function
+    streams_manhattan_bw = get_stream_manhattan_bw(streams_slots, streams_bw)
     # mypy bug: sees LpVariable as Any
-    # fix: declare a new function and trick mypy to see ilp_var's values as LpVariable
-    ilp_noc_selector_add_obj(m, ilp_var, streams_nodes, streams_bw, device)
+    # declaring a new function and trick mypy to see ilp_var's values as LpVariable
+    ilp_noc_selector_add_obj(m, ilp_var, streams_nodes, streams_manhattan_bw, device)
 
     m.solve(GUROBI_CMD(options=[("TimeLimit", 300)]))
 
