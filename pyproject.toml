@@ -58,7 +58,7 @@ flake8-useless-assert = "^0.4.4"
 flake8-warnings = "^0.4.0"
 mypy = "^1.9.0"
 pre-commit = "^3.7.0"
-pylint = "^3.1.0"
+pylint = "^3.2.2"
 setuptools = "^69.2.0"
 pytest = "^8.1.1"
 
