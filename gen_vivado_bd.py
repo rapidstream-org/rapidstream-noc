@@ -406,8 +406,7 @@ def gen_mb_bd(
 
 
 def gen_arm_bd_ddr(
-    bd_name: str,
-    top_mod: str,
+    bd_attr: dict[str, str],
     mmap_ports: dict[str, dict[str, int]],
     stream_attr: dict[str, dict[str, str]],
 ) -> list[str]:
@@ -416,8 +415,9 @@ def gen_arm_bd_ddr(
     Merges the tcl commands from the helper functions and dumps to a file.
 
     Args:
-        bd_name:        name of the block design.
-        top_mod:        name of the top-level module.
+        bd_attr:        bd_name: name of the block design
+                        top_mod: name of the top-level module.
+                        frequency: frequency of the CIPS pl ref clk.
         mmap_ports:     list of top-level mmap ports connected to the memory.
         stream_attr:    dictionary of top-level stream ports. Keys are "src" name.
                         Values are "dest" name, "bandwidth", and "width".
@@ -426,10 +426,10 @@ def gen_arm_bd_ddr(
     """
     tcl = []
     tcl += proc_tcl()
-    tcl += arm_tcl(bd_name, False)
+    tcl += arm_tcl(bd_attr["bd_name"], bd_attr["frequency"], False)
     tcl += arm_ddr_tcl()
     tcl += dut_tcl(
-        top_mod,
+        bd_attr["top_mod"],
         mmap_ports,
         stream_attr,
         False,
@@ -441,36 +441,35 @@ def gen_arm_bd_ddr(
 
 
 def gen_arm_bd_hbm(
-    bd_name: str,
-    top_mod: str,
+    bd_attr: dict[str, str],
     mmap_ports: dict[str, dict[str, int]],
     stream_attr: dict[str, dict[str, str]],
-    hbm_init_file: str,
 ) -> list[str]:
     """Generates Vivado block design with ARM and HBM.
 
     Merges the tcl commands from the helper functions and dumps to a file.
 
     Args:
-        bd_name:        name of the block design.
-        top_mod:        name of the top-level module.
+        bd_attr:        bd_name: name of the block design
+                        top_mod: name of the top-level module.
+                        hbm_init_file: backdoor HBM initialization mem file.
+                        frequency: frequency of the CIPS pl ref clk.
         mmap_ports:     list of top-level mmap ports connected to the memory.
         stream_attr:    dictionary of top-level stream ports. Keys are "src" name.
                         Values are "dest" name, "bandwidth", and "width".
-        hbm_init_file:  backdoor HBM initialization mem file.
 
     Returns a list of tcl commands.
     """
     tcl = []
     tcl += proc_tcl()
-    tcl += arm_tcl(bd_name, True)
+    tcl += arm_tcl(bd_attr["bd_name"], bd_attr["frequency"], True)
     tcl += arm_hbm_tcl(mmap_ports)
     tcl += dut_tcl(
-        top_mod,
+        bd_attr["top_mod"],
         mmap_ports,
         stream_attr,
         True,
-        hbm_init_file,
+        bd_attr["hbm_init_file"],
     )
     tcl += connect_dut_arm_hbm_tcl(stream_attr)
     tcl += assign_arm_bd_address()
@@ -480,8 +479,12 @@ def gen_arm_bd_hbm(
 if __name__ == "__main__":
     # Unit test
     arm_bd_tcl = gen_arm_bd_hbm(
-        "top_arm",
-        "Serpens",
+        {
+            "bd_name": "top_arm",
+            "top_mod": "Serpens",
+            "hbm_init_file": "/home/jakeke/rapidstream-noc/serpens_hbm24_nasa4704.mem",
+            "frequency": "300.0",
+        },
         {
             "m_axi_edge_list_ch_0": {"bank": 0, "read_bw": 15000, "write_bw": 0},
             "m_axi_edge_list_ch_1": {"bank": 1, "read_bw": 15000, "write_bw": 0},
@@ -513,8 +516,7 @@ if __name__ == "__main__":
             "m_axi_vec_Y_out": {"bank": 27, "read_bw": 0, "write_bw": 14000},
         },
         {},
-        "/home/jakeke/rapidstream-noc/serpens_hbm24_nasa4704.mem",
     )
 
-    with open("arm_bd.tcl", "w", encoding="utf-8") as file:
+    with open("test/arm_bd.tcl", "w", encoding="utf-8") as file:
         file.write("\n".join(arm_bd_tcl))

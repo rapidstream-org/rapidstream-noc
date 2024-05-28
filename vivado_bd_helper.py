@@ -467,7 +467,7 @@ connect_bd_intf_net -intf_net noc_lpddr4_1_CH1_LPDDR4_1 \
     ]
 
 
-def arm_tcl(bd_name: str, hbm: bool) -> list[str]:
+def arm_tcl(bd_name: str, frequency: str, hbm: bool) -> list[str]:
     """Generates the ARM block diagram for LPDDR.
 
     It creates the block diagram that matches the example Vitis platform shell.
@@ -502,7 +502,11 @@ CONFIG.PS_PMC_CONFIG { \
     CLOCK_MODE {Custom} \
     DESIGN_MODE {1} \
     DEVICE_INTEGRITY_MODE {Sysmon temperature voltage and external IO monitoring} \
-    PMC_CRP_PL0_REF_CTRL_FREQMHZ {300} \
+"""
+        ]
+        tcl += [f"PMC_CRP_PL0_REF_CTRL_FREQMHZ {{{frequency}}}"]
+        tcl += [
+            """
     PMC_GPIO0_MIO_PERIPHERAL {{ENABLE 1} {IO {PMC_MIO 0 .. 25}}} \
     PMC_GPIO1_MIO_PERIPHERAL {{ENABLE 1} {IO {PMC_MIO 26 .. 51}}} \
     PMC_MIO12 {{AUX_IO 0} {DIRECTION out} {DRIVE_STRENGTH 8mA} {OUTPUT_DATA default} \

@@ -68,6 +68,7 @@ Please provide:
 
     # currently hard-coded parameters
     FREQUENCY = 250.0
+    IMPL_FREQUENCY = "300.0"
     HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm24_nasa4704.mem"
     TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48.sv"
 
@@ -197,6 +198,13 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
         subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
         # generate vivado bd tcl
+        bd_attr = {
+            "bd_name": BD_NAME,
+            "top_mod": top_mod_name,
+            "hbm_init_file": HBM_INIT_FILE,
+            "frequency": IMPL_FREQUENCY,
+        }
+
         noc_stream_attr: dict[str, dict[str, str]] = {}
         for s in noc_streams:
             noc_stream_attr[f"m_axis_{s}"] = {}
@@ -206,11 +214,9 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
             noc_stream_attr[f"m_axis_{s}"]["width"] = str((streams_widths[s] + 7) // 8)
 
         tcl = gen_arm_bd_hbm(
-            bd_name=BD_NAME,
-            top_mod=top_mod_name,
+            bd_attr=bd_attr,
             mmap_ports=mmap_port_ir,
             stream_attr=noc_stream_attr,
-            hbm_init_file=HBM_INIT_FILE,
         )
         with open(f"{build_dir}/{VIVADO_BD_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
