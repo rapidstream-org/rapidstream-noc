@@ -39,20 +39,17 @@ def vp1802_nodes(
         nsu_nodes_col = []
         for y in range(num_row):
             nmu_nodes_col.append(Node(name=f"nmu_x{x}y{y}"))
-
             nsu_nodes_col.append(Node(name=f"nsu_x{x}y{y}"))
         all_nodes["nmu_nodes"].append(nmu_nodes_col)
         all_nodes["nsu_nodes"].append(nsu_nodes_col)
 
-    # create nps_vnoc nodes
-    for x in range(num_col):
+        # create nps_vnoc nodes
         col = []
         for y in range(num_row * 2):
             col.append(Node(name=f"nps_vnoc_x{x}y{y}"))
         all_nodes["nps_vnoc_nodes"].append(col)
 
-    # create interconnect nps nodes
-    for x in range(num_col):
+        # create interconnect nps nodes
         col = []
         for y in range(num_inter_rows):
             col.append(Node(name=f"nps_hnoc_x{x}y{y}"))
@@ -339,6 +336,8 @@ def vp1802_nocgraph() -> NocGraph:
         nsu_nodes=nodes["nsu_nodes"],
         nps_vnoc_nodes=nodes["nps_vnoc_nodes"],
         nps_hnoc_nodes=nodes["nps_hnoc_nodes"],
+        nps_hbm_nodes=[],
+        ncrb_hbm_nodes=[],
         nps_slr0_nodes=nodes["nps_slr0_nodes"],
         ncrb_nodes=nodes["ncrb_nodes"],
         edges=[],

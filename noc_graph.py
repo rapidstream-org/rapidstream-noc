@@ -48,6 +48,8 @@ class NocGraph(BaseModel):
     nsu_nodes: list[list[Node]]
     nps_vnoc_nodes: list[list[Node]]
     nps_hnoc_nodes: list[list[Node]]
+    nps_hbm_nodes: list[list[Node]]
+    ncrb_hbm_nodes: list[list[Node]]
     nps_slr0_nodes: list[Node]
     ncrb_nodes: list[list[Node]]
     edges: list[Edge]
