@@ -266,7 +266,7 @@ def dut_tcl(
         f"""
 # ======================= Adding DUT =======================
 
-startgroup"
+startgroup
 # Add RTL module to BD
 set dut [create_bd_cell -type module -reference {top_mod} dut_0]
 
