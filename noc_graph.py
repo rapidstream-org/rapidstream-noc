@@ -38,6 +38,8 @@ class NocGraph(BaseModel):
     nps_hnoc_nodes: 2d array of all interconnect NPS nodes bridging SLRs.
     nps_slr0_nodes: one row of the NPS nodes connecting the bottom SLR0 to DDR and CIPS.
     ncrb_nodes: 2d array of all NCRB nodes for east-west communication.
+
+    Note: all 2d arrays are indexed as in the Cartesian plane.
     """
 
     num_slr: int
@@ -50,7 +52,7 @@ class NocGraph(BaseModel):
     nps_hnoc_nodes: list[list[Node]]
     nps_hbm_nodes: list[list[Node]]
     ncrb_hbm_nodes: list[list[Node]]
-    nps_slr0_nodes: list[Node]
+    nps_slr0_nodes: list[list[Node]]
     ncrb_nodes: list[list[Node]]
     edges: list[Edge]
 
@@ -78,7 +80,7 @@ class NocGraph(BaseModel):
         all_nodes += [n.name for row in self.nsu_nodes for n in row]
         all_nodes += [n.name for row in self.nps_vnoc_nodes for n in row]
         all_nodes += [n.name for row in self.nps_hnoc_nodes for n in row]
-        all_nodes += [n.name for n in self.nps_slr0_nodes]
+        all_nodes += [n.name for row in self.nps_slr0_nodes for n in row]
         all_nodes += [n.name for row in self.ncrb_nodes for n in row]
         return all_nodes
 

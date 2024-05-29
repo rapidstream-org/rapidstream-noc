@@ -55,6 +55,12 @@ def vp1802_nodes(
             col.append(Node(name=f"nps_hnoc_x{x}y{y}"))
         all_nodes["nps_hnoc_nodes"].append(col)
 
+        # create bottom SLR0 nps nodes
+        col = []
+        for y in range(4):
+            col.append(Node(name=f"nps_slr0_x{x}y{y}"))
+        all_nodes["nps_slr0_nodes"].append(col)
+
     # create ncrb nodes for connecting interconnect rows within each slr
     # NoC Clock Re-convergent Buffer (NCRB)
     for x in range(num_col - 1):
@@ -62,10 +68,6 @@ def vp1802_nodes(
         for y in range(num_inter_rows):
             col.append(Node(name=f"ncrb_x{x}y{y}"))
         all_nodes["ncrb_nodes"].append(col)
-
-    # create bottom nps nodes connecting SLR0 to DDR and CIPS
-    for x in range(num_col * 2):
-        all_nodes["nps_slr0_nodes"].append(Node(name=f"nps_slr0_x{x}y0"))
 
     return all_nodes
 
@@ -264,28 +266,32 @@ def create_nps_slr0_edges(G: NocGraph, num_col: int) -> list[Edge]:
     edges = []
 
     # slr0's nps_vnoc <-> nps_slr0
-    for x in range(num_col * 2):
-        edges += create_bidir_edges(
-            G.nps_slr0_nodes[x], G.nps_vnoc_nodes[int(x / 2)][x % 2], bandwidth=16000
-        )
-        # print(f"nps_slr0_x{x}y0", f"nps_vnoc_x{int(x/2)}y{x%2}")
-
-    # ddr and CIPS crossbar
     for x in range(num_col):
-        edges += create_bidir_edges(
-            G.nps_slr0_nodes[x * 2], G.nps_slr0_nodes[x * 2 + 1], bandwidth=16000
-        )
-        # print(f"nps_slr0_x{x*2+1}y0 <-> nps_slr0_x{x*2}y0")
-
-    for x in range(num_col - 1):
-        for r in range(2):
+        for y in range(2):
             edges += create_bidir_edges(
-                G.nps_slr0_nodes[x * 2 + r],
-                G.nps_slr0_nodes[x * 2 + r + 2],
+                G.nps_slr0_nodes[x][y], G.nps_vnoc_nodes[x][y], bandwidth=16000
+            )
+        # print(f"nps_slr0_x{x}y{y}", f"nps_vnoc_x{x}y{y}")
+
+    # connect slr0 nps nodes vertically
+    for x in range(num_col):
+        # row 0 <-> row 2
+        # row 1 <-> row 3
+        for row in range(2):
+            edges += create_bidir_edges(
+                G.nps_slr0_nodes[x][row * 2 + row],
+                G.nps_slr0_nodes[x][row],
                 bandwidth=16000,
             )
-            # print(f"nps_slr0_x{x*2+r}y0 <-> nps_slr0_x{x*2+r+2}y0")
 
+    # connect each row of slr0 nps nodes horizontally
+    for x in range(num_col - 1):
+        for row in range(4):
+            edges += create_bidir_edges(
+                G.nps_slr0_nodes[x][row],
+                G.nps_slr0_nodes[x + 1][row],
+                bandwidth=16000,
+            )
     return edges
 
 
@@ -318,7 +324,7 @@ def vp1802_nocgraph() -> NocGraph:
     >>> nx.shortest_path(nx_g, source="nmu_x0y0", target="nsu_x0y0")
     ['nmu_x0y0', 'nps_vnoc_x0y1', 'nps_vnoc_x0y0', 'nsu_x0y0']
     >>> nx.shortest_path(nx_g, source="nmu_x0y0", target="nsu_x1y0")
-    ['nmu_x0y0', 'nps_vnoc_x0y1', 'nps_slr0_x1y0', 'nps_slr0_x3y0', 'nps_vnoc_x1y1', \
+    ['nmu_x0y0', 'nps_vnoc_x0y1', 'nps_slr0_x0y1', 'nps_slr0_x1y1', 'nps_vnoc_x1y1', \
         'nps_vnoc_x1y0', 'nsu_x1y0']
     """
 
