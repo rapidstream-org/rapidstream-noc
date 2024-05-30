@@ -907,22 +907,24 @@ set_property -dict [list \
                 CONFIG.CONNECTIONS {{"
         ]
         arm_s_axi = f"S{i:02d}_AXI"
-        for j in range(hbm_chnl):
-            tcl += [
-                f"""
-        HBM{j}_PORT0 {{read_bw {{50}} write_bw {{0}} \
-            read_avg_burst {{4}} write_avg_burst {{4}}}} \
-        HBM{j}_PORT2 {{read_bw {{50}} write_bw {{0}} \
-            read_avg_burst {{4}} write_avg_burst {{4}}}} \
+        for _, attr in mmap_ports.items():
+            # only provide read access to the output ports
+            if attr["write_bw"] > 0:
+                tcl += [
+                    f"""
+    HBM{attr["bank"] // 2}_PORT{(attr["bank"] % 2) * 2} {{read_bw {{50}} write_bw {{0}}\
+    read_avg_burst {{4}} write_avg_burst {{4}}}} \
 """
-            ]
+                ]
         tcl += [f"}}] [get_bd_intf_pins $noc_hbm_0/{arm_s_axi}]"]
 
         # associate busif to clk
         tcl += [
-            f"set_property -dict [ list \
-                    CONFIG.ASSOCIATED_BUSIF {{S{i:02d}_AXI}} \
-                ] [get_bd_pins $noc_hbm_0/aclk{i}]"
+            f"""
+set_property -dict [ list \
+    CONFIG.ASSOCIATED_BUSIF {{S{i:02d}_AXI}} \
+] [get_bd_pins $noc_hbm_0/aclk{i}]
+"""
         ]
 
     tcl += [
