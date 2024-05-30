@@ -387,6 +387,60 @@ def ilp_noc_selector_add_constr(
         )
 
 
+def ilp_noc_selector_add_constr_special(
+    m: LpProblem,
+    ilp_var: dict[str, dict[str, LpVariable | dict[Any, LpVariable]]],
+    streams_nodes: dict[str, dict[str, list[str]]],
+    device: Device,
+) -> None:
+    """Adds special constraints for the NoC selector ILP."""
+
+    # 6. Vivado 2023.2 NoC Compiler Corner Cases
+    # if there are more than one mapped stream,
+    # Note: I am not putting the if-more-than-one-mapped-stream check because
+    #       if there is only one stream to map, we can use column 1
+    # column 0 can only have max 1 src and 1 dest
+    for slr in range(device.noc_graph.num_slr):
+        m += (
+            lpSum(
+                ilp_var[stream_name]["y"][node]
+                for stream_name, end_nodes in streams_nodes.items()
+                for node in end_nodes["src"]
+                if node in device.noc_graph.get_column_nmu_nodes(0, slr)
+            )
+            <= 1
+        )
+        m += (
+            lpSum(
+                ilp_var[stream_name]["z"][node]
+                for stream_name, end_nodes in streams_nodes.items()
+                for node in end_nodes["dest"]
+                if node in device.noc_graph.get_column_nsu_nodes(0, slr)
+            )
+            <= 1
+        )
+
+    # forbid any cross-SLR edges in column 0
+    for stream_name, _ in streams_nodes.items():
+        m += (
+            lpSum(
+                ilp_var[stream_name]["x"][e]
+                for e in device.noc_graph.get_column_cross_slr_edges(0)
+            )
+            == 0
+        )
+
+    # forbid using column 0 as a bypass path
+    for stream_name, _ in streams_nodes.items():
+        m += (
+            lpSum(
+                ilp_var[stream_name]["x"][e]
+                for e in device.noc_graph.get_column_entrance_edges(0)
+            )
+            <= 1
+        )
+
+
 def ilp_noc_selector_add_obj(
     m: LpProblem,
     ilp_var: dict[str, dict[str, LpVariable]],
@@ -454,7 +508,7 @@ def post_process_noc_ilp(
     # prints the tcl constraints for the selected NMU and NSU nodes
     print_noc_loc_tcl(node_loc)
 
-    print(f"mip has selected {len(noc_streams)} streams")
+    print(f"ILP has selected {len(noc_streams)} streams")
     return noc_streams
 
 
@@ -484,6 +538,7 @@ def ilp_noc_selector(
 
     # Constraints
     ilp_noc_selector_add_constr(m, ilp_var, streams_nodes, streams_bw, device)
+    ilp_noc_selector_add_constr_special(m, ilp_var, streams_nodes, device)
 
     # Objective function
     streams_manhattan_bw = get_stream_manhattan_bw(streams_slots, streams_bw)
@@ -495,3 +550,70 @@ def ilp_noc_selector(
 
     # Post-solve operations
     return post_process_noc_ilp(ilp_var, streams_nodes)
+
+
+# playground
+if __name__ == "__main__":
+    from vh1582_nocgraph import vh1582_nocgraph
+
+    test_G = vh1582_nocgraph()
+    test_D = Device(
+        part_num="",
+        board_part="",
+        slot_width=2,
+        slot_height=2,
+        noc_graph=test_G,
+        nmu_per_slot=[],  # generated
+        nsu_per_slot=[],  # generated
+        cr_mapping=[
+            ["CLOCKREGION_X0Y0:CLOCKREGION_X4Y4", "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7"],
+            ["CLOCKREGION_X5Y0:CLOCKREGION_X9Y4", "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7"],
+        ],
+    )
+    test_streams_slots = {
+        "a1": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
+        "a2": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
+        "a3": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
+        "a4": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
+        "b1": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
+        "b2": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
+        "b3": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
+        "b4": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
+        "g1": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
+        "g2": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
+        "g3": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
+        "g4": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
+        "c1": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
+        "c2": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
+        "c3": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
+        "c4": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
+        "h1": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
+        "h2": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
+        "h3": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
+        "h4": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
+    }
+    test_streams_bw = {
+        "a1": 16000.0,
+        "a2": 16000.0,
+        "a3": 16000.0,
+        "a4": 16000.0,
+        "b1": 16000.0,
+        "b2": 16000.0,
+        "b3": 16000.0,
+        "b4": 16000.0,
+        "g1": 16000.0,
+        "g2": 16000.0,
+        "g3": 16000.0,
+        "g4": 16000.0,
+        "c1": 16000.0,
+        "c2": 16000.0,
+        "c3": 16000.0,
+        "c4": 16000.0,
+        "h1": 16000.0,
+        "h2": 16000.0,
+        "h3": 16000.0,
+        "h4": 16000.0,
+    }
+    test_selected = ilp_noc_selector(test_streams_slots, test_streams_bw, test_D)
+    print(test_selected)
+    assert len(test_selected) == len(test_streams_slots), "Test failed!"
