@@ -36,6 +36,7 @@ class DeviceEnum(Enum):
 class SelectorEnum(Enum):
     """Supported NoC selectors."""
 
+    NONE = auto()
     EMPTY = auto()
     RANDOM = auto()
     GREEDY = auto()
@@ -142,7 +143,7 @@ cp {rapidstream_json} {build_dir}/
             subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
     # Main algorithm: select streams for NoC
-    if selector == SelectorEnum.EMPTY.name:
+    if selector in (SelectorEnum.NONE.name, SelectorEnum.EMPTY.name):
         noc_streams = []
     elif selector == SelectorEnum.RANDOM.name:
         noc_streams = random_selector(streams_slots, D)
@@ -222,16 +223,20 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
             file.write("\n".join(tcl))
 
         # export constraints
-        with open(
-            f"{build_dir}/{NOC_PASS_WRAPPER_JSON}", "r", encoding="utf-8"
-        ) as file:
-            noc_pass_wrapper_ir = json.load(file)
+        if selector == SelectorEnum.NONE.name:
+            tcl = []
+        else:
+            with open(
+                f"{build_dir}/{NOC_PASS_WRAPPER_JSON}", "r", encoding="utf-8"
+            ) as file:
+                noc_pass_wrapper_ir = json.load(file)
 
-        floorplan = parse_floorplan(noc_pass_wrapper_ir, GROUPED_MOD_NAME)
-        print("Number of modules:", sum(len(v) for v in floorplan.values()))
-        print("Used slots: ", floorplan.keys())
+            floorplan = parse_floorplan(noc_pass_wrapper_ir, GROUPED_MOD_NAME)
+            print("Number of modules:", sum(len(v) for v in floorplan.values()))
+            print("Used slots: ", floorplan.keys())
 
-        tcl = export_constraint(floorplan, D)
+            tcl = export_constraint(floorplan, D)
+
         with open(f"{build_dir}/{CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
 
