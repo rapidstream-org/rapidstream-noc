@@ -21,7 +21,13 @@ from noc_pass import (
     ilp_noc_selector,
     random_selector,
 )
-from tcl_helper import dump_streams_loc_tcl, export_constraint, gen_vivado_prj_tcl
+from tcl_helper import (
+    dump_neg_paths_summary,
+    dump_streams_loc_tcl,
+    export_constraint,
+    gen_vivado_prj_tcl,
+    parse_neg_paths,
+)
 from vh1582_nocgraph import vh1582_nocgraph
 from vp1802_nocgraph import vp1802_nocgraph
 
@@ -84,6 +90,7 @@ Please provide:
     CONSTRAINT_TCL = "constraint.tcl"
     VIVADO_BD_TCL = "arm_bd.tcl"
     VIVADO_PRJ_TCL = "run.tcl"
+    DUMP_NEG_PATHS_TCL = "dump_neg_paths.tcl"
 
     if device_name == DeviceEnum.VP1802.name:
         G = vp1802_nocgraph()
@@ -257,11 +264,18 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
         with open(f"{build_dir}/{VIVADO_PRJ_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
 
+        tcl = dump_neg_paths_summary(build_dir)
+        with open(f"{build_dir}/{DUMP_NEG_PATHS_TCL}", "w", encoding="utf-8") as file:
+            file.write("\n".join(tcl))
+
         # launch vivado
         zsh_cmds = f"""
 source ~/.zshrc && amd
 cd {build_dir}
 vivado -mode batch -source {VIVADO_PRJ_TCL}
+vivado -mode batch -source {DUMP_NEG_PATHS_TCL}
 """
         print(zsh_cmds)
         subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+
+        parse_neg_paths(build_dir, list(streams_slots.keys()), noc_streams)

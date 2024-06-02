@@ -6,10 +6,10 @@ All rights reserved. The contributor(s) of this file has/have agreed to the
 RapidStream Contributor License Agreement.
 """
 
-import json
+import re
 
 from device import Device
-from ir_helper import extract_slot_coord, parse_floorplan
+from ir_helper import extract_slot_coord
 
 
 def print_noc_loc_tcl(node_loc: dict[str, tuple[str, str]]) -> None:
@@ -34,14 +34,14 @@ def print_noc_loc_tcl(node_loc: dict[str, tuple[str, str]]) -> None:
 
 
 def dump_streams_loc_tcl(
-    streams_nodes: dict[str, dict[str, list[str]]], selected: list[str]
+    streams_nodes: dict[str, dict[str, list[str]]], noc_streams: list[str]
 ) -> list[str]:
-    """Dumps the selected streams' NMU and NSU location tcl.
+    """Dumps the NoC streams' NMU and NSU location tcl.
 
     Return a list of tcl commands.
     """
     tcl = []
-    for port_num, s in enumerate(selected):
+    for port_num, s in enumerate(noc_streams):
         slot_nmu_nodes = []
         slot_nsu_nodes = []
         for n in streams_nodes[s]["src"]:
@@ -191,38 +191,173 @@ foreach pblock [get_pblocks] {
     return tcl
 
 
+def dump_neg_paths_summary(build_dir: str) -> list[str]:
+    """Generates tcl commands to dump all negative slack paths in the routed checkpoint.
+
+    Returns a list of tcl commands.
+    """
+    tcl = [
+        f"""
+open_checkpoint \
+    {build_dir}/vivado_proj/vivado_proj.runs/impl_1/top_arm_wrapper_routed.dcp
+report_timing_summary -setup -max_paths 1000000 -no_pblock -no_header \
+    -path_type summary -slack_lesser_than 0 \
+    -file {build_dir}/neg_paths_summary.rpt
+close_design
+"""
+    ]
+    return tcl
+
+
+def parse_neg_paths(
+    build_dir: str, inter_slot_streams: list[str], noc_streams: list[str]
+) -> None:
+    """Parses the inter-slot streams and NoC streams' negative slack paths.
+
+    Returns None and prints.
+    """
+
+    with open(f"{build_dir}/neg_paths_summary.rpt", "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Find the "Max Delay Paths" section
+    max_delay_paths_section = re.search(
+        r"Max Delay Paths(.*?)Pulse Width Checks", content, re.DOTALL
+    )
+
+    # Check if the section is found
+    if not max_delay_paths_section:
+        print("Max Delay Paths section not found.")
+        return
+
+    # Extract the section content
+    lines = max_delay_paths_section.group(1).strip().split("\n")
+
+    paths = []
+    # Iterate over the lines to extract startpoint and endpoint names
+    for i in range(3, len(lines), 3):  # Start from the third line and step by 3
+        if len(lines) > i + 2:
+            startpoint = lines[i].strip()
+            endpoint = lines[i + 1].strip()
+            slack = lines[i + 2].strip()
+            assert startpoint != ""
+            assert endpoint != ""
+            assert float(slack) < 0
+            paths.append((startpoint, endpoint, slack))
+
+    def get_count_and_slack(
+        paths: list[tuple[str, str, str]], streams: list[str]
+    ) -> tuple[int, float]:
+        count = 0
+        total_slack = 0.0
+        for startpoint, endpoint, slack in paths:
+            for s in streams:
+                if s in startpoint and s in endpoint:
+                    count += 1
+                    total_slack += float(slack)
+        return count, total_slack
+
+    print("Number of failing endpoints:", len(paths))
+    count, total_slack = get_count_and_slack(paths, inter_slot_streams)
+    print("Number of inter-slot streams paths with negative slack", count)
+    print("Total negative slack of inter-slot streams:", total_slack)
+    count, total_slack = get_count_and_slack(paths, noc_streams)
+    print("Number of selected streams paths with negative slack:", count)
+    print("Total negative slack of noc-streams:", total_slack)
+
+
 if __name__ == "__main__":
-    from vh1582_nocgraph import vh1582_nocgraph
+    import subprocess
 
-    # autobridge json file to extract
-    SERPENS_IR = "/home/jakeke/Serpens/vhk158/rs_ch28_noc_vivado/noc_pass.json"
-    with open(SERPENS_IR, "r", encoding="utf-8") as file:
-        design = json.load(file)
+    DUMP_NEG_PATHS_TCL = "dump_neg_paths.tcl"
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/build_a48_empty"
+    test_tcl = dump_neg_paths_summary(TEST_DIR)
+    with open(f"{TEST_DIR}/{DUMP_NEG_PATHS_TCL}", "w", encoding="utf-8") as file:
+        file.write("\n".join(test_tcl))
 
-        serpens_floorplan = parse_floorplan(design, "axis_noc_if")
+    zsh_cmds = f"""
+source ~/.zshrc && amd
+vivado -mode batch -source {TEST_DIR}/{DUMP_NEG_PATHS_TCL}
+"""
+    print(zsh_cmds)
+    subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
-        print("Number of modules:", sum(len(v) for v in serpens_floorplan.values()))
-        print(serpens_floorplan.keys())
+    inter_slot_fifos = [
+        "PE_inst_Serpens_11_hs_if_din",
+        "PE_inst_Serpens_26_hs_if_din",
+        "PE_inst_Serpens_33_hs_if_din",
+        "Yvec_inst_Serpens_2_hs_if_din",
+        "Yvec_inst_Serpens_8_hs_if_din",
+        "fifo_A_Serpens_0_hs_if_din",
+        "fifo_A_Serpens_10_hs_if_din",
+        "fifo_A_Serpens_1_hs_if_din",
+        "fifo_A_Serpens_2_hs_if_din",
+        "fifo_A_Serpens_33_hs_if_din",
+        "fifo_A_Serpens_34_hs_if_din",
+        "fifo_A_Serpens_35_hs_if_din",
+        "fifo_A_Serpens_36_hs_if_din",
+        "fifo_A_Serpens_37_hs_if_din",
+        "fifo_A_Serpens_38_hs_if_din",
+        "fifo_A_Serpens_39_hs_if_din",
+        "fifo_A_Serpens_3_hs_if_din",
+        "fifo_A_Serpens_40_hs_if_din",
+        "fifo_A_Serpens_41_hs_if_din",
+        "fifo_A_Serpens_42_hs_if_din",
+        "fifo_A_Serpens_43_hs_if_din",
+        "fifo_A_Serpens_44_hs_if_din",
+        "fifo_A_Serpens_45_hs_if_din",
+        "fifo_A_Serpens_46_hs_if_din",
+        "fifo_A_Serpens_47_hs_if_din",
+        "fifo_A_Serpens_4_hs_if_din",
+        "fifo_A_Serpens_5_hs_if_din",
+        "fifo_A_Serpens_6_hs_if_din",
+        "fifo_A_Serpens_7_hs_if_din",
+        "fifo_A_Serpens_8_hs_if_din",
+        "fifo_A_Serpens_9_hs_if_din",
+        "fifo_X_pe_Serpens_11_hs_if_din",
+        "fifo_X_pe_Serpens_26_hs_if_din",
+        "fifo_X_pe_Serpens_33_hs_if_din",
+        "fifo_Y_pe_Serpens_11_hs_if_din",
+        "fifo_Y_pe_Serpens_12_hs_if_din",
+        "fifo_Y_pe_Serpens_13_hs_if_din",
+        "fifo_Y_pe_Serpens_14_hs_if_din",
+        "fifo_Y_pe_Serpens_15_hs_if_din",
+        "fifo_Y_pe_Serpens_16_hs_if_din",
+        "fifo_Y_pe_Serpens_17_hs_if_din",
+        "fifo_Y_pe_Serpens_24_hs_if_din",
+        "fifo_Y_pe_Serpens_25_hs_if_din",
+        "fifo_Y_pe_Serpens_2_hs_if_din",
+        "fifo_Y_pe_Serpens_33_hs_if_din",
+        "fifo_Y_pe_Serpens_34_hs_if_din",
+        "fifo_Y_pe_Serpens_35_hs_if_din",
+        "fifo_Y_pe_Serpens_8_hs_if_din",
+        "fifo_Y_pe_abd_Serpens_3_hs_if_din",
+        "fifo_Y_pe_abd_Serpens_6_hs_if_din",
+        "fifo_Y_pe_abd_Serpens_7_hs_if_din",
+        "fifo_aXvec_Serpens_2_hs_if_din",
+        "fifo_aXvec_Serpens_8_hs_if_din",
+    ]
 
-        D = Device(
-            name="",
-            slot_width=2,
-            slot_height=2,
-            noc_graph=vh1582_nocgraph(),
-            nmu_per_slot=[],  # generated
-            nsu_per_slot=[],  # generated
-            cr_mapping=[
-                [
-                    "CLOCKREGION_X0Y0:CLOCKREGION_X4Y4",
-                    "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7",
-                ],
-                [
-                    "CLOCKREGION_X5Y0:CLOCKREGION_X9Y4",
-                    "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7",
-                ],
-            ],
-        )
+    selected = [
+        "PE_inst_Serpens_11_hs_if_din",
+        "Yvec_inst_Serpens_8_hs_if_din",
+        "fifo_A_Serpens_0_hs_if_din",
+        "fifo_A_Serpens_2_hs_if_din",
+        "fifo_A_Serpens_39_hs_if_din",
+        "fifo_A_Serpens_3_hs_if_din",
+        "fifo_A_Serpens_43_hs_if_din",
+        "fifo_A_Serpens_47_hs_if_din",
+        "fifo_A_Serpens_7_hs_if_din",
+        "fifo_X_pe_Serpens_11_hs_if_din",
+        "fifo_X_pe_Serpens_26_hs_if_din",
+        "fifo_X_pe_Serpens_33_hs_if_din",
+        "fifo_Y_pe_Serpens_2_hs_if_din",
+        "fifo_Y_pe_Serpens_33_hs_if_din",
+        "fifo_Y_pe_Serpens_34_hs_if_din",
+        "fifo_Y_pe_Serpens_35_hs_if_din",
+        "fifo_Y_pe_abd_Serpens_6_hs_if_din",
+        "fifo_Y_pe_abd_Serpens_7_hs_if_din",
+        "fifo_aXvec_Serpens_8_hs_if_din",
+    ]
 
-        test_tcl = export_constraint(serpens_floorplan, D)
-        with open("constraint.tcl", "w", encoding="utf-8") as file:
-            file.write("\n".join(test_tcl))
+    parse_neg_paths(TEST_DIR, inter_slot_fifos, selected)
