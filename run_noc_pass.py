@@ -132,8 +132,8 @@ Please provide:
         nmu_per_slot=[],  # generated
         nsu_per_slot=[],  # generated
         cr_mapping=[
-            ["CLOCKREGION_X0Y0:CLOCKREGION_X4Y4", "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7"],
-            ["CLOCKREGION_X5Y0:CLOCKREGION_X9Y4", "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7"],
+            ["CLOCKREGION_X0Y1:CLOCKREGION_X4Y4", "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7"],
+            ["CLOCKREGION_X5Y1:CLOCKREGION_X9Y4", "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7"],
         ],
     )
 
@@ -179,29 +179,37 @@ cp {rapidstream_json} {build_dir}/
         with open(f"{build_dir}/{NOC_CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
 
-        # generate grouped ir and rtl
-        zsh_cmds = f"""
+        if selector in (SelectorEnum.NONE.name, SelectorEnum.EMPTY.name):
+            # skip generating grouped ir and wrapper
+            zsh_cmds = f"""
+rapidstream-exporter -i {rapidstream_json} -f {build_dir}/rtl
+"""
+        else:
+            # generate grouped ir with the selected streams
+            zsh_cmds = f"""
 source ~/.zshrc && amd
 rapidstream-optimizer -i {rapidstream_json} -o {build_dir}/{NOC_PASS_JSON} \
     create-group-wrapper --group-name-to-insts-json={build_dir}/{SELECTED_STREAMS_JSON}
 """
-        print(zsh_cmds)
-        subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+            print(zsh_cmds)
+            subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
-        # generate new rtl wrapper
-        with open(f"{build_dir}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:
-            noc_pass_ir = json.load(file)
+            # generate new rtl wrapper
+            with open(f"{build_dir}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:
+                noc_pass_ir = json.load(file)
 
-        noc_pass_wrapper_ir = noc_rtl_wrapper(noc_pass_ir, GROUPED_MOD_NAME)
+            noc_pass_wrapper_ir = noc_rtl_wrapper(noc_pass_ir, GROUPED_MOD_NAME)
 
-        with open(
-            f"{build_dir}/{NOC_PASS_WRAPPER_JSON}", "w", encoding="utf-8"
-        ) as file:
-            json.dump(noc_pass_wrapper_ir, file, indent=4)
+            with open(
+                f"{build_dir}/{NOC_PASS_WRAPPER_JSON}", "w", encoding="utf-8"
+            ) as file:
+                json.dump(noc_pass_wrapper_ir, file, indent=4)
 
-        zsh_cmds = f"""
+            zsh_cmds = f"""
 rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
 """
+
+        # generate rtl folder
         print(zsh_cmds)
         subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
@@ -233,9 +241,12 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
         if selector == SelectorEnum.NONE.name:
             tcl = []
         else:
-            with open(
-                f"{build_dir}/{NOC_PASS_WRAPPER_JSON}", "r", encoding="utf-8"
-            ) as file:
+            final_ir = (
+                rapidstream_json
+                if selector == SelectorEnum.EMPTY.name
+                else f"{build_dir}/{NOC_PASS_WRAPPER_JSON}"
+            )
+            with open(final_ir, "r", encoding="utf-8") as file:
                 noc_pass_wrapper_ir = json.load(file)
 
             floorplan = parse_floorplan(noc_pass_wrapper_ir, GROUPED_MOD_NAME)

@@ -96,7 +96,7 @@ class IREnum(Enum):
     TAIL_REGION = "__TAIL_REGION"
     DATA_WIDTH = "DATA_WIDTH"
     DEPTH = "DEPTH"
-    PIPELINE_BODY_LEVEL = "PIPELINE_BODY_LEVEL"
+    BODY_LEVEL = "BODY_LEVEL"
     IF_DOUT = "if_dout"
     IF_EMPTY_N = "if_empty_n"
     IF_READ = "if_read"
@@ -169,9 +169,11 @@ def parse_floorplan(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, list
     combined_mods = {
         # top
         "inst/": parse_top_mod(ir)["submodules"],
-        # grouped module
-        f"inst/{grouped_mod_name}_0/": parse_mod(ir, grouped_mod_name)["submodules"],
     }
+    if grouped_mod_ir := parse_mod(ir, grouped_mod_name):
+        print("No constraints from the grouped module.")
+        # grouped module
+        combined_mods[f"inst/{grouped_mod_name}_0/"] = grouped_mod_ir["submodules"]
 
     insts = {}
     for parent, mods in combined_mods.items():
@@ -363,7 +365,7 @@ def create_nmu_fifo_ir(
         if p["name"] == IREnum.DEPTH.value:
             p["expr"] = create_id_expr(fifo_params["depth"] // 2)
         # remove the body level pipelines
-        elif p["name"] == IREnum.PIPELINE_BODY_LEVEL.value:
+        elif p["name"] == IREnum.BODY_LEVEL.value:
             p["expr"] = create_id_expr(0)
         # assign NMU fifo regions to head region
         elif IREnum.REGION.value in p["name"]:
@@ -395,7 +397,7 @@ def create_nsu_fifo_ir(
         if p["name"] == IREnum.DEPTH.value:
             p["expr"] = create_id_expr(fifo_params["depth"] // 2)
         # remove the body level pipelines
-        elif p["name"] == IREnum.PIPELINE_BODY_LEVEL.value:
+        elif p["name"] == IREnum.BODY_LEVEL.value:
             p["expr"] = create_id_expr(0)
         # assign NSU fifo regions to tail region
         elif IREnum.REGION.value in p["name"]:
