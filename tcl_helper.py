@@ -177,7 +177,7 @@ resize_pblock {slot} -add {cr}
 
     tcl += [
         """
-foreach pblock [get_pblocks -regexp SLOT_X\\d+Y\\d+_To_SLOT_X\\d+Y\\d+] {
+foreach pblock [get_pblocks -regexp SLOT_X\\\\d+Y\\\\d+_To_SLOT_X\\\\d+Y\\\\d+] {
   if {[get_property CELL_COUNT $pblock] == 0} {
     puts "WARNING: delete empty pblock $pblock "
     delete_pblocks $pblock
