@@ -105,6 +105,8 @@ class IREnum(Enum):
     IF_WRITE = "if_write"
     NMU = "nmu"
     NSU = "nsu"
+    CREDIT_CONTROL_MASTER = "_credit_control_master"
+    RS_ROUTE = "RS_ROUTE"
 
 
 def eval_id_expr(expr: list[dict[str, str]]) -> int:
@@ -223,6 +225,16 @@ def create_id_expr(val: str) -> list[dict[str, str]]:
     return [{"type": "id", "repr": val}]
 
 
+def set_expr(source: list[dict[str, Any]], key: str, val: list[dict[str, str]]) -> None:
+    """Sets an expr in place.
+
+    Return None
+    """
+    for c in source:
+        if c["name"] == key:
+            c["expr"] = val
+
+
 def create_wire_ir(name: str, range_left: str, range_right: str) -> dict[str, Any]:
     """Create a wire IR.
 
@@ -256,8 +268,8 @@ def create_port_ir(
     return new_port
 
 
-def create_port_connection(port_name: str, wire: str) -> dict[str, Any]:
-    """Create a port connection.
+def create_port_wire_connection(port_name: str, wire: str) -> dict[str, Any]:
+    """Create a port connection to a wire.
 
     Returns a dictionary.
     """
@@ -265,6 +277,18 @@ def create_port_connection(port_name: str, wire: str) -> dict[str, Any]:
         "name": port_name,
         "hierarchical_name": [port_name],
         "expr": create_id_expr(wire),
+    }
+
+
+def create_port_const_connection(port_name: str, wire: str) -> dict[str, Any]:
+    """Create a port connection to a constant.
+
+    Returns a dictionary.
+    """
+    return {
+        "name": port_name,
+        "hierarchical_name": [port_name],
+        "expr": create_lit_expr(wire),
     }
 
 
@@ -279,6 +303,17 @@ def create_parameter_ir(name: str, value: str) -> dict[str, Any]:
         "expr": create_lit_expr(value),
         "range": None,
     }
+
+
+def find_repr(source: list[dict[str, Any]], key: str) -> str:
+    """Finds the repr value of a key in the Rapidstream expr IR.
+
+    Returns a string.
+    """
+    for c in source:
+        if c["name"] == key:
+            return str(c["expr"][0]["repr"])
+    return ""
 
 
 def create_m_axis_ports(name: str, datawidth: str) -> dict[str, dict[str, Any]]:
@@ -315,7 +350,8 @@ def create_module_inst_ir(
     module_name: str,
     inst_name: str,
     params: dict[str, str],
-    connections: dict[str, str],
+    wire_connections: dict[str, str],
+    const_connections: dict[str, str],
 ) -> dict[str, Any]:
     """Create a module's instance IR with port connections.
 
@@ -326,7 +362,12 @@ def create_module_inst_ir(
         "hierarchical_name": None,
         "module": module_name,
         "connections": [
-            create_port_connection(port, wire) for port, wire in connections.items()
+            create_port_wire_connection(port, wire)
+            for port, wire in wire_connections.items()
+        ]
+        + [
+            create_port_const_connection(port, wire)
+            for port, wire in const_connections.items()
         ],
         "parameters": [
             create_parameter_ir(param, val) for param, val in params.items()
@@ -506,7 +547,7 @@ always @ (posedge clk) begin
     end else begin
         credit_o_r <= credit_cnt_r;
         credit_valid_o_r <= 0;
-        if (send_credit & (credit_cnt_r > 0)) begin
+        if (send_credit) begin
             credit_valid_o_r <= 1'b1;
         end
     end
@@ -643,6 +684,7 @@ def noc_rtl_wrapper(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, Any]
                 f"{fifo['name']}_tlast_inst",
                 {},
                 {"out": m_axis_ports["tlast"]["name"]},
+                {},
             )
         )
 
@@ -655,7 +697,9 @@ def noc_rtl_wrapper(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, Any]
     for m in top_ir["submodules"]:
         if m["module"] == grouped_mod_name:
             for p in axis_noc_ports:
-                m["connections"].append(create_port_connection(p["name"], p["name"]))
+                m["connections"].append(
+                    create_port_wire_connection(p["name"], p["name"])
+                )
 
             # remove the grouped mod if empty to avoid the Vivado black-box impl error
             if len(m["connections"]) == 0:
@@ -666,17 +710,165 @@ def noc_rtl_wrapper(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, Any]
     new_ir["modules"]["module_definitions"].append(create_const_one_driver())
 
     # add credit-based controllers to each NMU and NSU FIFOs
-    new_ir = add_credit_control(new_ir, grouped_mod_name, "12")
+    add_credit_control(new_ir, grouped_mod_name, "12")
+    pipeline_credit_ack(grouped_mod_ir)
 
     return new_ir
 
 
+def parse_fifo_rs_routes(grouped_mod_ir: dict[str, Any]) -> dict[str, list[str]]:
+    """Parses the RS_ROUTE of each inter-slot FIFO in the Rapidstream IR.
+
+    Returns a dictionary of FIFO names and lists of RS_ROUTE.
+    """
+    rs_routes = {}
+    for fifo in grouped_mod_ir["submodules"]:
+        if IREnum.NMU.value in fifo["name"]:
+            fifo_name = fifo["name"][4:]
+            for p in fifo["pragmas"]:
+                if p[0] == IREnum.RS_ROUTE.value:
+                    rs_routes[fifo_name] = p[1].strip('"').split(",")
+            assert (
+                fifo_name in rs_routes
+            ), f'RS_ROUTE not found in pragma {fifo["pragmas"]}'
+    return rs_routes
+
+
+def get_credit_return_regions(fifo_route: list[str]) -> dict[str, str]:
+    """Generates the credit return pipeline's floorplan region parameters.
+
+    fifo_route: the inter-slot FIFO's RS_ROUTE.
+
+    Returns a dictionary of strings.
+
+    Example:
+    >>> get_credit_return_regions(["SLOT_X0Y1_TO_SLOT_X0Y1", "SLOT_X1Y1_TO_SLOT_X1Y1"])
+    {'__HEAD_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_0_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_1_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__TAIL_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_2_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_3_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_4_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_5_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_6_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_7_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_8_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"'}
+    >>> get_credit_return_regions(
+    ...     [
+    ...         "SLOT_X1Y1_TO_SLOT_X1Y1",
+    ...         "SLOT_X0Y1_TO_SLOT_X0Y1",
+    ...         "SLOT_X0Y0_TO_SLOT_X0Y0",
+    ...         "SLOT_X1Y0_TO_SLOT_X1Y0",
+    ...     ]
+    ... )
+    {'__HEAD_REGION': '"SLOT_X1Y0_TO_SLOT_X1Y0"',
+    '__BODY_0_REGION': '"SLOT_X1Y0_TO_SLOT_X1Y0"',
+    '__BODY_1_REGION': '"SLOT_X0Y0_TO_SLOT_X0Y0"',
+    '__BODY_2_REGION': '"SLOT_X0Y0_TO_SLOT_X0Y0"',
+    '__BODY_3_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_4_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_5_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__TAIL_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_6_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_7_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_8_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"'}
+    """
+    regions = {}
+    # reverse the routes for the credit return wires
+    fifo_route.reverse()
+
+    # double pipeline
+    for i, r in enumerate(fifo_route):
+        # HEAD
+        if i == 0:
+            regions["__HEAD_REGION"] = f'"{r}"'
+            regions["__BODY_0_REGION"] = f'"{r}"'
+        # TAIL
+        elif i == len(fifo_route) - 1:
+            regions[f"__BODY_{(i - 1) * 2 + 1}_REGION"] = f'"{r}"'
+            regions["__TAIL_REGION"] = f'"{r}"'
+        # BODY
+        else:
+            for j in range(2):
+                regions[f"__BODY_{(i - 1) * 2 + j + 1}_REGION"] = f'"{r}"'
+
+    # populates the remaining unused BODY REGIONs
+    for i in range(len(fifo_route) * 2 - 2, 9):
+        regions[f"__BODY_{i}_REGION"] = f'"{fifo_route[-1]}"'
+    return regions
+
+
+def pipeline_credit_ack(grouped_mod_ir: dict[str, Any]) -> None:
+    """Pipeline the credit return wires in the Rapidstream IR.
+
+    Returns None.
+    """
+    rs_routes = parse_fifo_rs_routes(grouped_mod_ir)
+    new_modules = []
+    for mod in grouped_mod_ir["submodules"]:
+        if IREnum.CREDIT_CONTROL_MASTER.value in mod["name"]:
+            fifo_name = mod["name"].split(IREnum.CREDIT_CONTROL_MASTER.value)[0]
+            credit_cnt_width = find_repr(mod["parameters"], "CREDIT_CNT_WIDTH")
+            rs_route = rs_routes[fifo_name]
+
+            new_modules.append(
+                create_module_inst_ir(
+                    "__rs_hs_pipeline",
+                    f"{fifo_name}_credit_pipeline",
+                    {
+                        "BODY_LEVEL": str(len(rs_route) * 2 - 2),
+                        "DATA_WIDTH": credit_cnt_width,
+                        "DEPTH": "1",
+                        "EXTRA_PIPELINE_BEFORE_TAIL": "0",
+                        "PIPELINE_READY_IN_HEAD": "1",
+                        "PIPELINE_VALID_AND_DATA_IN_HEAD": "1",
+                    }
+                    | get_credit_return_regions(rs_route),
+                    {
+                        "clk": "ap_clk",
+                        "if_din": f"{fifo_name}_slave_credit_o",
+                        "if_dout": f"{fifo_name}_master_credit_i",
+                        "if_empty_n": f"{fifo_name}_master_credit_valid_i",
+                        "if_write": f"{fifo_name}_slave_credit_valid_o",
+                    },
+                    {
+                        "reset": "1'b0",
+                        "if_full_n": "",
+                        "if_read": "1'b1",
+                    },
+                )
+            )
+
+            grouped_mod_ir["wires"] += [
+                create_wire_ir(f"{fifo_name}_master_credit_valid_i", "0", "0"),
+                create_wire_ir(
+                    f"{fifo_name}_master_credit_i",
+                    str(int(credit_cnt_width) - 1),
+                    "0",
+                ),
+            ]
+
+            set_expr(
+                mod["connections"],
+                "credit_i",
+                create_id_expr(f"{fifo_name}_master_credit_i"),
+            )
+            set_expr(
+                mod["connections"],
+                "credit_valid_i",
+                create_id_expr(f"{fifo_name}_master_credit_valid_i"),
+            )
+
+    grouped_mod_ir["submodules"] += new_modules
+
+
 def add_credit_control(
     ir: dict[str, Any], grouped_mod_name: str, init_credit: str
-) -> dict[str, Any]:
+) -> None:
     """Modifies the Rapidstream IR to add credit-based controllers.
 
-    Returns the modified json.
+    Returns None.
     """
 
     def str_bit_width(num: str) -> str:
@@ -684,19 +876,6 @@ def add_credit_control(
 
     def str_minus_one(num: str) -> str:
         return str((int(num) - 1))
-
-    def find_repr(source: list[dict[str, Any]], key: str) -> str:
-        for c in source:
-            if c["name"] == key:
-                return str(c["expr"][0]["repr"])
-        return ""
-
-    def set_expr(
-        source: list[dict[str, Any]], key: str, val: list[dict[str, str]]
-    ) -> None:
-        for c in source:
-            if c["name"] == key:
-                c["expr"] = val
 
     # the following mutable variables can be modified in place
     top_ir = parse_top_mod(ir)
@@ -706,7 +885,7 @@ def add_credit_control(
     grouped_mod_ir["ports"].append(create_port_ir("ap_rst_n", "input wire", "0", "0"))
     for m in top_ir["submodules"]:
         if m["module"] == grouped_mod_name:
-            m["connections"].append(create_port_connection("ap_rst_n", "ap_rst_n"))
+            m["connections"].append(create_port_wire_connection("ap_rst_n", "ap_rst_n"))
 
     new_modules = []
     for fifo in grouped_mod_ir["submodules"]:
@@ -723,13 +902,14 @@ def add_credit_control(
                     {
                         "clk": "ap_clk",
                         "rst_n": "ap_rst_n",
-                        "credit_valid_i": f"{fifo_name}_credit_valid",
-                        "credit_i": f"{fifo_name}_credit",
+                        "credit_valid_i": f"{fifo_name}_slave_credit_valid_o",
+                        "credit_i": f"{fifo_name}_slave_credit_o",
                         "empty_n_i": f"nmu_{fifo_name}_empty_n",
                         "tready_i": f"m_axis_{fifo_name}_tready",
                         "read_o": f"nmu_{fifo_name}_read",
                         "tvalid_o": f"m_axis_{fifo_name}_tvalid",
                     },
+                    {},
                 )
             )
 
@@ -767,16 +947,17 @@ def add_credit_control(
                         "rst_n": "ap_rst_n",
                         "read_i": nsu_if_read,
                         "empty_n_i": nsu_if_empty_n,
-                        "credit_valid_o": f"{fifo_name}_credit_valid",
-                        "credit_o": f"{fifo_name}_credit",
+                        "credit_valid_o": f"{fifo_name}_slave_credit_valid_o",
+                        "credit_o": f"{fifo_name}_slave_credit_o",
                     },
+                    {},
                 )
             )
 
             grouped_mod_ir["wires"] += [
-                create_wire_ir(f"{fifo_name}_credit_valid", "0", "0"),
+                create_wire_ir(f"{fifo_name}_slave_credit_valid_o", "0", "0"),
                 create_wire_ir(
-                    f"{fifo_name}_credit",
+                    f"{fifo_name}_slave_credit_o",
                     str_minus_one(str_bit_width(init_credit)),
                     "0",
                 ),
@@ -796,8 +977,6 @@ def add_credit_control(
         )
     )
 
-    return ir
-
 
 if __name__ == "__main__":
     import json
@@ -808,17 +987,13 @@ if __name__ == "__main__":
     NOC_PASS_WRAPPER_JSON = "noc_pass_wrapper.json"
     with open(f"{TEST_DIR}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:
         design = json.load(file)
-
     new_serpens_ir = noc_rtl_wrapper(design, "axis_noc_if")
-
     with open(f"{TEST_DIR}/{NOC_PASS_WRAPPER_JSON}", "w", encoding="utf-8") as file:
         json.dump(new_serpens_ir, file, indent=4)
-
     zsh_cmds = f"""
 rm -rf {TEST_DIR}/rtl
 rapidstream-exporter -i {TEST_DIR}/{NOC_PASS_WRAPPER_JSON} -f {TEST_DIR}/rtl
 """
-
     # generate rtl folder
     print(zsh_cmds)
     subprocess.run(["zsh", "-c", zsh_cmds], check=True)
