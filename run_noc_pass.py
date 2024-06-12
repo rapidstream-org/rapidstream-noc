@@ -14,7 +14,8 @@ from enum import Enum, auto
 
 from device import Device
 from gen_vivado_bd import gen_arm_bd_hbm
-from ir_helper import noc_rtl_wrapper, parse_floorplan, parse_inter_slot, parse_top_mod
+from ir_helper import parse_floorplan, parse_inter_slot, parse_top_mod
+from ir_verilog import noc_rtl_wrapper
 from noc_pass import (
     get_slot_to_noc_nodes,
     greedy_selector,
@@ -76,7 +77,7 @@ Please provide:
     # currently hard-coded parameters
     FREQUENCY = 250.0
     IMPL_FREQUENCY = "300.0"
-    HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm24_nasa4704.mem"
+    HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
     TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48.sv"
 
     # intermediate dumps
