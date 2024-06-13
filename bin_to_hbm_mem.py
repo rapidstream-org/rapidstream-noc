@@ -84,7 +84,7 @@ if __name__ == "__main__":
         "50.bin": "47E0000000",
         "51.bin": "47A0000000",
     }
-    SERPENS_MEM_FILE = "serpens_hbm48_nasa4704.mem"
+    SERPENS_MEM_FILE = "test/serpens_hbm48_nasa4704.mem"
 
     # Serpens a = 24
     # SERPENS_BIN_DIR = "/home/jakeke/Serpens/build/tapa_sim_nasa4704/"
@@ -117,6 +117,6 @@ if __name__ == "__main__":
     #     "25.bin":   "4640000000",
     #     "26.bin":   "4680000000",
     # }
-    # SERPENS_MEM_FILE = 'serpens_hbm24_nasa4704.mem'
+    # SERPENS_MEM_FILE = 'test/serpens_hbm24_nasa4704.mem'
 
     bin_to_hbm_mem(SERPENS_BIN_DIR, serpens_bin_dict, SERPENS_MEM_FILE)

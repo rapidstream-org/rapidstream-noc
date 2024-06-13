@@ -6,7 +6,7 @@ All rights reserved. The contributor(s) of this file has/have agreed to the
 RapidStream Contributor License Agreement.
 """
 
-from enum import Enum
+from enum import Enum, auto
 from typing import Any
 
 
@@ -30,6 +30,16 @@ class IREnum(Enum):
     NSU = "nsu"
     CREDIT_CONTROL_MASTER = "_credit_control_master"
     RS_ROUTE = "RS_ROUTE"
+    FLOORPLAN_REGION = "floorplan_region"
+    PRAGMAS = "pragmas"
+
+
+class CreditReturnEnum(Enum):
+    """Supported credit return modes."""
+
+    NONE = auto()
+    PIPELINE = auto()
+    NOC = auto()
 
 
 def extract_slot_coord(slot_name: str) -> tuple[int, int]:
@@ -134,7 +144,7 @@ def parse_inter_slot(
     widths: dict[str, int] = {}
     for sub_mod in ir["submodules"]:
         if sub_mod["module"] == IREnum.PIPELINE.value:
-            # a pipeline module with "REGION" parameters crosses slot boundaries
+            # a pipeline module with *_REGION parameters crosses slot boundaries
             if any(IREnum.REGION.value in p["name"] for p in sub_mod["parameters"]):
                 name = sub_mod["name"]
                 slots[name] = {}
@@ -267,7 +277,9 @@ def create_port_ir(
     return new_port
 
 
-def create_port_wire_connection(port_name: str, wire: str) -> dict[str, Any]:
+def create_port_wire_connection(
+    port_name: str, wire: str | list[dict[str, str]]
+) -> dict[str, Any]:
     """Create a port connection to a wire.
 
     Returns a dictionary.
@@ -275,7 +287,7 @@ def create_port_wire_connection(port_name: str, wire: str) -> dict[str, Any]:
     return {
         "name": port_name,
         "hierarchical_name": [port_name],
-        "expr": create_id_expr(wire),
+        "expr": create_id_expr(wire) if isinstance(wire, str) else wire,
     }
 
 
@@ -304,14 +316,28 @@ def create_parameter_ir(name: str, value: str) -> dict[str, Any]:
     }
 
 
-def find_repr(source: list[dict[str, Any]], key: str) -> str:
-    """Finds the repr value of a key in the Rapidstream expr IR.
+def find_expr(
+    source: list[dict[str, Any | list[dict[str, str]]]], key: str
+) -> list[dict[str, str]]:
+    """Finds the expr value of a key in the Rapidstream list IR.
 
     Returns a string.
     """
     for c in source:
         if c["name"] == key:
-            return str(c["expr"][0]["repr"])
+            return c["expr"]
+    print(f"WARNING: expr for key {key} not found!")
+    return []
+
+
+def find_repr(source: list[dict[str, Any]], key: str) -> str:
+    """Finds the first type id repr value of a key in the Rapidstream list IR.
+
+    Returns a string.
+    """
+    for e in find_expr(source, key):
+        return str(e["repr"])
+    print(f"WARNING: repr for key {key} not found!")
     return ""
 
 
@@ -346,10 +372,9 @@ def create_s_axis_ports(name: str, datawidth: str) -> dict[str, dict[str, Any]]:
 
 
 def create_module_inst_ir(
-    module_name: str,
-    inst_name: str,
+    module_str_config: dict[str, str],
     params: dict[str, str],
-    wire_connections: dict[str, str],
+    wire_connections: dict[str, str | list[dict[str, str]]],
     const_connections: dict[str, str],
 ) -> dict[str, Any]:
     """Create a module's instance IR with port connections.
@@ -357,9 +382,9 @@ def create_module_inst_ir(
     Return a dictionary IR.
     """
     return {
-        "name": inst_name,
+        "name": module_str_config["inst_name"],
         "hierarchical_name": None,
-        "module": module_name,
+        "module": module_str_config["module_name"],
         "connections": [
             create_port_wire_connection(port, wire)
             for port, wire in wire_connections.items()
@@ -371,8 +396,17 @@ def create_module_inst_ir(
         "parameters": [
             create_parameter_ir(param, val) for param, val in params.items()
         ],
-        "floorplan_region": None,
+        "floorplan_region": (
+            module_str_config["floorplan_region"]
+            if IREnum.FLOORPLAN_REGION.value in module_str_config
+            else None
+        ),
         "area": None,
+        "pragmas": (
+            module_str_config["pragmas"]
+            if IREnum.PRAGMAS.value in module_str_config
+            else []
+        ),
     }
 
 
@@ -384,14 +418,14 @@ def parse_fifo_params(fifo: dict[str, Any]) -> dict[str, str]:
     params = {}
     for p in fifo["parameters"]:
         if p["name"] == IREnum.DEPTH.value:
-            params["depth"] = str(eval_id_expr(p["expr"]))
+            params[IREnum.DEPTH.value] = str(eval_id_expr(p["expr"]))
         elif p["name"] == IREnum.HEAD_REGION.value:
-            params["head_region"] = p["expr"][0]["repr"]
+            params[IREnum.HEAD_REGION.value] = p["expr"][0]["repr"]
         elif p["name"] == IREnum.TAIL_REGION.value:
-            params["tail_region"] = p["expr"][0]["repr"]
+            params[IREnum.TAIL_REGION.value] = p["expr"][0]["repr"]
         elif p["name"] == IREnum.DATA_WIDTH.value:
             # assumes that we are discarding the eot bit in streams
-            params["data_width"] = str(eval_id_expr(p["expr"]) - 1)
+            params[IREnum.DATA_WIDTH.value] = str(eval_id_expr(p["expr"]) - 1)
     return params
 
 
@@ -411,3 +445,81 @@ def parse_fifo_rs_routes(grouped_mod_ir: dict[str, Any]) -> dict[str, list[str]]
                 fifo_name in rs_routes
             ), f'RS_ROUTE not found in pragma {fifo["pragmas"]}'
     return rs_routes
+
+
+def set_all_pipeline_regions(region: str) -> dict[str, str]:
+    """Creates a parameter dict of the same REGIONs for the pipeline module.
+
+    Returns a dictionary of strings.
+    """
+    region_params = [f"__BODY_{i}_REGION" for i in range(9)] + [
+        IREnum.HEAD_REGION.value,
+        IREnum.TAIL_REGION.value,
+    ]
+    return {r: region for r in region_params}
+
+
+def get_credit_return_regions(fifo_route: list[str]) -> dict[str, str]:
+    """Generates the credit return pipeline's floorplan region parameters.
+
+    fifo_route: the inter-slot FIFO's RS_ROUTE.
+    Uses double pipeline in each SLOT.
+
+    Returns a dictionary of strings.
+
+    Example:
+    >>> get_credit_return_regions(["SLOT_X0Y1_TO_SLOT_X0Y1", "SLOT_X1Y1_TO_SLOT_X1Y1"])
+    {'__HEAD_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_0_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_1_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__TAIL_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_2_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_3_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_4_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_5_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_6_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_7_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_8_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"'}
+    >>> get_credit_return_regions(
+    ...     [
+    ...         "SLOT_X1Y1_TO_SLOT_X1Y1",
+    ...         "SLOT_X0Y1_TO_SLOT_X0Y1",
+    ...         "SLOT_X0Y0_TO_SLOT_X0Y0",
+    ...         "SLOT_X1Y0_TO_SLOT_X1Y0",
+    ...     ]
+    ... )
+    {'__HEAD_REGION': '"SLOT_X1Y0_TO_SLOT_X1Y0"',
+    '__BODY_0_REGION': '"SLOT_X1Y0_TO_SLOT_X1Y0"',
+    '__BODY_1_REGION': '"SLOT_X0Y0_TO_SLOT_X0Y0"',
+    '__BODY_2_REGION': '"SLOT_X0Y0_TO_SLOT_X0Y0"',
+    '__BODY_3_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_4_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
+    '__BODY_5_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__TAIL_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_6_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_7_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
+    '__BODY_8_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"'}
+    """
+    regions = {}
+    # reverse the routes for the credit return wires
+    fifo_route.reverse()
+
+    # double pipeline
+    for i, r in enumerate(fifo_route):
+        # HEAD
+        if i == 0:
+            regions[IREnum.HEAD_REGION.value] = f'"{r}"'
+            regions["__BODY_0_REGION"] = f'"{r}"'
+        # TAIL
+        elif i == len(fifo_route) - 1:
+            regions[f"__BODY_{(i - 1) * 2 + 1}_REGION"] = f'"{r}"'
+            regions[IREnum.TAIL_REGION.value] = f'"{r}"'
+        # BODY
+        else:
+            for j in range(2):
+                regions[f"__BODY_{(i - 1) * 2 + j + 1}_REGION"] = f'"{r}"'
+
+    # populates the remaining unused BODY REGIONs
+    for i in range(len(fifo_route) * 2 - 2, 9):
+        regions[f"__BODY_{i}_REGION"] = f'"{fifo_route[-1]}"'
+    return regions

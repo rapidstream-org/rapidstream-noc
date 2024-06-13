@@ -10,6 +10,7 @@ import copy
 from typing import Any
 
 from ir_helper import (
+    CreditReturnEnum,
     IREnum,
     create_id_expr,
     create_lit_expr,
@@ -20,11 +21,14 @@ from ir_helper import (
     create_port_wire_connection,
     create_s_axis_ports,
     create_wire_ir,
+    find_expr,
     find_repr,
+    get_credit_return_regions,
     parse_fifo_params,
     parse_fifo_rs_routes,
     parse_mod,
     parse_top_mod,
+    set_all_pipeline_regions,
     set_expr,
 )
 
@@ -52,9 +56,7 @@ endmodule
     }
 
 
-def create_credit_control_master(
-    init_credit: str, credit_cnt_width: int
-) -> dict[str, Any]:
+def create_credit_control_master(params: dict[str, str]) -> dict[str, Any]:
     """Create the credit_control_master module definition.
 
     Return a dictionary IR.
@@ -64,14 +66,15 @@ def create_credit_control_master(
         "hierarchical_name": ["credit_control_mastser"],
         "module_type": "verilog_module",
         "parameters": [
-            create_parameter_ir("INIT_CREDIT", init_credit),
-            create_parameter_ir("CREDIT_CNT_WIDTH", str(credit_cnt_width)),
+            create_parameter_ir(param, val) for param, val in params.items()
         ],
         "ports": [
             create_port_ir("clk", "input wire", "0", "0"),
             create_port_ir("rst_n", "input wire", "0", "0"),
             create_port_ir("credit_valid_i", "input wire", "0", "0"),
-            create_port_ir("credit_i", "input wire", str(credit_cnt_width - 1), "0"),
+            create_port_ir(
+                "credit_i", "input wire", str(int(params["CREDIT_CNT_WIDTH"]) - 1), "0"
+            ),
             create_port_ir("empty_n_i", "input wire", "0", "0"),
             create_port_ir("tready_i", "input wire", "0", "0"),
             create_port_ir("read_o", "output wire", "0", "0"),
@@ -79,8 +82,8 @@ def create_credit_control_master(
         ],
         "verilog": f"""
 module credit_control_master # (
-    parameter INIT_CREDIT           = {init_credit},
-    parameter CREDIT_CNT_WIDTH      = {credit_cnt_width}
+    parameter INIT_CREDIT           = {params['INIT_CREDIT']},
+    parameter CREDIT_CNT_WIDTH      = {params['CREDIT_CNT_WIDTH']}
 ) (
     input  wire                                 clk,
     input  wire                                 rst_n,
@@ -122,9 +125,7 @@ endmodule
     }
 
 
-def create_credit_control_slave(
-    init_credit: str, credit_cnt_width: int, timer_width: str
-) -> dict[str, Any]:
+def create_credit_control_slave(params: dict[str, str]) -> dict[str, Any]:
     """Create the credit_control_slave module definition.
 
     Return a dictionary IR.
@@ -134,9 +135,7 @@ def create_credit_control_slave(
         "hierarchical_name": ["credit_control_slave"],
         "module_type": "verilog_module",
         "parameters": [
-            create_parameter_ir("INIT_CREDIT", init_credit),
-            create_parameter_ir("CREDIT_CNT_WIDTH", str(credit_cnt_width)),
-            create_parameter_ir("TIMER_WIDTH", timer_width),
+            create_parameter_ir(param, val) for param, val in params.items()
         ],
         "ports": [
             create_port_ir("clk", "input wire", "0", "0"),
@@ -144,13 +143,15 @@ def create_credit_control_slave(
             create_port_ir("read_i", "input wire", "0", "0"),
             create_port_ir("empty_n_i", "input wire", "0", "0"),
             create_port_ir("credit_valid_o", "output wire", "0", "0"),
-            create_port_ir("credit_o", "output wire", str(credit_cnt_width - 1), "0"),
+            create_port_ir(
+                "credit_o", "output wire", str(int(params["CREDIT_CNT_WIDTH"]) - 1), "0"
+            ),
         ],
         "verilog": f"""
 module credit_control_slave # (
-    parameter INIT_CREDIT           = {init_credit},
-    parameter CREDIT_CNT_WIDTH      = {credit_cnt_width},
-    parameter TIMER_WIDTH           = {timer_width}
+    parameter INIT_CREDIT           = {params['INIT_CREDIT']},
+    parameter CREDIT_CNT_WIDTH      = {params['CREDIT_CNT_WIDTH']},
+    parameter TIMER_WIDTH           = {params['TIMER_WIDTH']}
 ) (
     input  wire                                 clk,
     input  wire                                 rst_n,
@@ -215,72 +216,141 @@ endmodule
     }
 
 
-def get_credit_return_regions(fifo_route: list[str]) -> dict[str, str]:
-    """Generates the credit return pipeline's floorplan region parameters.
+def create_credit_control_slave_group(params: dict[str, str]) -> dict[str, Any]:
+    """Create the credit_control_slave_group module definition.
 
-    fifo_route: the inter-slot FIFO's RS_ROUTE.
-
-    Returns a dictionary of strings.
-
-    Example:
-    >>> get_credit_return_regions(["SLOT_X0Y1_TO_SLOT_X0Y1", "SLOT_X1Y1_TO_SLOT_X1Y1"])
-    {'__HEAD_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
-    '__BODY_0_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
-    '__BODY_1_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__TAIL_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__BODY_2_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__BODY_3_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__BODY_4_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__BODY_5_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__BODY_6_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__BODY_7_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__BODY_8_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"'}
-    >>> get_credit_return_regions(
-    ...     [
-    ...         "SLOT_X1Y1_TO_SLOT_X1Y1",
-    ...         "SLOT_X0Y1_TO_SLOT_X0Y1",
-    ...         "SLOT_X0Y0_TO_SLOT_X0Y0",
-    ...         "SLOT_X1Y0_TO_SLOT_X1Y0",
-    ...     ]
-    ... )
-    {'__HEAD_REGION': '"SLOT_X1Y0_TO_SLOT_X1Y0"',
-    '__BODY_0_REGION': '"SLOT_X1Y0_TO_SLOT_X1Y0"',
-    '__BODY_1_REGION': '"SLOT_X0Y0_TO_SLOT_X0Y0"',
-    '__BODY_2_REGION': '"SLOT_X0Y0_TO_SLOT_X0Y0"',
-    '__BODY_3_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__BODY_4_REGION': '"SLOT_X0Y1_TO_SLOT_X0Y1"',
-    '__BODY_5_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
-    '__TAIL_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
-    '__BODY_6_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
-    '__BODY_7_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"',
-    '__BODY_8_REGION': '"SLOT_X1Y1_TO_SLOT_X1Y1"'}
+    Return a dictionary IR.
     """
-    regions = {}
-    # reverse the routes for the credit return wires
-    fifo_route.reverse()
+    return {
+        "name": "credit_control_slave",
+        "hierarchical_name": ["credit_control_slave"],
+        "module_type": "verilog_module",
+        "parameters": [
+            create_parameter_ir(param, val) for param, val in params.items()
+        ],
+        "ports": [
+            create_port_ir("clk", "input wire", "0", "0"),
+            create_port_ir("rst_n", "input wire", "0", "0"),
+            create_port_ir(
+                "read_i", "input wire", str(int(params["GROUP_SIZE"]) - 1), "0"
+            ),
+            create_port_ir(
+                "empty_n_i", "input wire", str(int(params["GROUP_SIZE"]) - 1), "0"
+            ),
+            create_port_ir("ready_i", "input wire", "0", "0"),
+            create_port_ir("credit_valid_o", "output wire", "0", "0"),
+            create_port_ir(
+                "credit_o",
+                "output wire",
+                str(int(params["CREDIT_CNT_WIDTH"]) * int(params["GROUP_SIZE"]) - 1),
+                "0",
+            ),
+        ],
+        "verilog": f"""
+module credit_control_slave_group # (
+    parameter INIT_CREDIT           = {params['INIT_CREDIT']},
+    parameter CREDIT_CNT_WIDTH      = {params['CREDIT_CNT_WIDTH']},
+    parameter TIMER_WIDTH           = {params['TIMER_WIDTH']},
+    parameter GROUP_SIZE            = {params['GROUP_SIZE']}
+) (
+    input  wire                                                     clk,
+    input  wire                                                     rst_n,
+    input  wire [GROUP_SIZE - 1:0]                                  read_i,
+    input  wire [GROUP_SIZE - 1:0]                                  empty_n_i,
+    input  wire                                                     ready_i,
+    output wire                                                     credit_valid_o,
+    output wire [GROUP_SIZE - 1:0][CREDIT_CNT_WIDTH - 1:0]          credit_o
+);
 
-    # double pipeline
-    for i, r in enumerate(fifo_route):
-        # HEAD
-        if i == 0:
-            regions["__HEAD_REGION"] = f'"{r}"'
-            regions["__BODY_0_REGION"] = f'"{r}"'
-        # TAIL
-        elif i == len(fifo_route) - 1:
-            regions[f"__BODY_{(i - 1) * 2 + 1}_REGION"] = f'"{r}"'
-            regions["__TAIL_REGION"] = f'"{r}"'
-        # BODY
-        else:
-            for j in range(2):
-                regions[f"__BODY_{(i - 1) * 2 + j + 1}_REGION"] = f'"{r}"'
-
-    # populates the remaining unused BODY REGIONs
-    for i in range(len(fifo_route) * 2 - 2, 9):
-        regions[f"__BODY_{i}_REGION"] = f'"{fifo_route[-1]}"'
-    return regions
+reg [TIMER_WIDTH - 1:0] timer;
 
 
-def pipeline_credit_ack(grouped_mod_ir: dict[str, Any]) -> None:
+reg [CREDIT_CNT_WIDTH - 1:0] credit_cnt_r [GROUP_SIZE - 1:0];
+reg credit_valid_o_r;
+reg [CREDIT_CNT_WIDTH - 1:0] credit_o_r [GROUP_SIZE - 1:0];
+wire [GROUP_SIZE - 1:0] credits_loaded;
+wire [GROUP_SIZE - 1:0] credits_present;
+wire send_credit;
+wire credit_sent;
+
+assign send_credit = (&timer) | (|credits_loaded);
+assign credit_sent = credit_valid_o_r & ready_i;
+
+always @ (posedge clk) begin
+    if (!rst_n) timer <= 0;
+    else begin
+        if (send_credit) timer <= 0;
+        else if (&timer) timer <= timer;
+        else if (|credits_present) timer <= timer + 1;
+    end
+end
+
+genvar i;
+generate
+    for (i = 0; i < GROUP_SIZE; i = i + 1) begin : credit_cnt_gen_block
+        always @ (posedge clk) begin
+            if (!rst_n) credit_cnt_r[i] <= 0;
+            else begin
+                if (read_i[i] & empty_n_i[i]) begin
+                    if (send_credit) begin
+                        credit_cnt_r[i] <= 1;
+                    end else begin
+                        credit_cnt_r[i] <= credit_cnt_r[i] + 1;
+                    end
+                end
+                else if (send_credit) begin
+                    credit_cnt_r[i] <= 0;
+                end
+            end
+        end
+        // loaded enough credits -- half of the buffer size
+        assign credits_loaded[i] = credit_cnt_r[i] == (INIT_CREDIT >> 1);
+        assign credits_present[i] = credit_cnt_r[i] > 0;
+    end
+endgenerate
+
+integer j;
+always @ (posedge clk) begin
+    if (!rst_n) begin
+        for (j = 0; j < GROUP_SIZE; j = j + 1) begin
+            credit_o_r[j] <= 0;
+        end
+        credit_valid_o_r <= 0;
+    end else begin
+        for (j = 0; j < GROUP_SIZE; j = j + 1) begin
+            if (send_credit) begin
+                credit_o_r[j] <= credit_cnt_r[j];
+            end
+            else begin
+                credit_o_r[j] <= credit_o_r[j];
+            end
+        end
+
+        credit_valid_o_r <= credit_valid_o_r;
+        if (credit_sent) begin
+            credit_valid_o_r <= 1'b0;
+        end
+        else if (send_credit) begin
+            credit_valid_o_r <= 1'b1;
+        end
+    end
+end
+
+assign credit_valid_o = credit_valid_o_r;
+generate
+    for (i = 0; i < GROUP_SIZE; i = i + 1) begin : credit_o_assign_block
+        assign credit_o[i] = credit_o_r[i];
+    end
+endgenerate
+
+endmodule
+""",
+        "metadata": None,
+        "submodules_module_names": [],
+    }
+
+
+def pipeline_credit_ret(grouped_mod_ir: dict[str, Any]) -> None:
     """Pipeline the credit return wires in the Rapidstream IR.
 
     Returns None.
@@ -295,8 +365,10 @@ def pipeline_credit_ack(grouped_mod_ir: dict[str, Any]) -> None:
 
             new_modules.append(
                 create_module_inst_ir(
-                    "__rs_hs_pipeline",
-                    f"{fifo_name}_credit_pipeline",
+                    {
+                        "module_name": IREnum.PIPELINE.value,
+                        "inst_name": f"{fifo_name}_credit_pipeline",
+                    },
                     {
                         "BODY_LEVEL": str(len(rs_route) * 2 - 2),
                         "DATA_WIDTH": credit_cnt_width,
@@ -344,41 +416,38 @@ def pipeline_credit_ack(grouped_mod_ir: dict[str, Any]) -> None:
     grouped_mod_ir["submodules"] += new_modules
 
 
-def add_credit_control(
-    ir: dict[str, Any], grouped_mod_name: str, init_credit: str
-) -> None:
-    """Modifies the Rapidstream IR to add credit-based controllers.
+def credit_ret_over_noc(ir: dict[str, Any], grouped_mod_name: str) -> None:
+    """Use NoC for the credit return wires in the Rapidstream IR.
 
     Returns None.
     """
-
-    def str_bit_width(num: str) -> str:
-        return str(int(num).bit_length())
-
-    def str_minus_one(num: str) -> str:
-        return str((int(num) - 1))
-
     # the following mutable variables can be modified in place
-    top_ir = parse_top_mod(ir)
-    grouped_mod_ir = parse_mod(ir, grouped_mod_name)
+    parse_top_mod(ir)
+    parse_mod(ir, grouped_mod_name)
 
-    # adds the reset ports
-    grouped_mod_ir["ports"].append(create_port_ir("ap_rst_n", "input wire", "0", "0"))
-    for m in top_ir["submodules"]:
-        if m["module"] == grouped_mod_name:
-            m["connections"].append(create_port_wire_connection("ap_rst_n", "ap_rst_n"))
 
-    new_modules = []
-    for fifo in grouped_mod_ir["submodules"]:
-        fifo_name = fifo["name"][4:]
+def add_credit_control_master(
+    grouped_mod_ir: dict[str, Any], init_credit: str, noc_fifos: list[dict[str, Any]]
+) -> None:
+    """Modifies the Rapidstream IR to add credit-based master controllers.
+
+    Returns None.
+    """
+    for fifo in noc_fifos:
         if IREnum.NMU.value in fifo["name"]:
-            new_modules.append(
+            fifo_name = fifo["name"][4:]
+            grouped_mod_ir["submodules"].append(
                 create_module_inst_ir(
-                    "credit_control_master",
-                    f"{fifo_name}_credit_control_master",
+                    {
+                        "module_name": "credit_control_master",
+                        "inst_name": f"{fifo_name}_credit_control_master",
+                        "floorplan_region": find_repr(
+                            fifo["parameters"], IREnum.HEAD_REGION.value
+                        ).strip('"'),
+                    },
                     {
                         "INIT_CREDIT": init_credit,
-                        "CREDIT_CNT_WIDTH": str_bit_width(init_credit),
+                        "CREDIT_CNT_WIDTH": str(int(init_credit).bit_length()),
                     },
                     {
                         "clk": "ap_clk",
@@ -410,17 +479,37 @@ def add_credit_control(
                 create_id_expr(f"nmu_{fifo_name}_read"),
             )
 
-        elif IREnum.NSU.value in fifo["name"]:
+            # sets the inter-slot FIFO DEPTH
+            set_expr(
+                fifo["parameters"], IREnum.DEPTH.value, create_lit_expr(init_credit)
+            )
+
+
+def add_credit_control_slave(
+    grouped_mod_ir: dict[str, Any], init_credit: str, noc_fifos: list[dict[str, Any]]
+) -> None:
+    """Modifies the Rapidstream IR to add credit-based slave controllers.
+
+    Returns None.
+    """
+    for fifo in noc_fifos:
+        if IREnum.NSU.value in fifo["name"]:
+            fifo_name = fifo["name"][4:]
             nsu_if_empty_n = find_repr(fifo["connections"], IREnum.IF_EMPTY_N.value)
             nsu_if_read = find_repr(fifo["connections"], IREnum.IF_READ.value)
 
-            new_modules.append(
+            grouped_mod_ir["submodules"].append(
                 create_module_inst_ir(
-                    "credit_control_slave",
-                    f"{fifo_name}_credit_control_slave",
+                    {
+                        "module_name": "credit_control_slave",
+                        "inst_name": f"{fifo_name}_credit_control_slave",
+                        "floorplan_region": find_repr(
+                            fifo["parameters"], IREnum.HEAD_REGION.value
+                        ).strip('"'),
+                    },
                     {
                         "INIT_CREDIT": init_credit,
-                        "CREDIT_CNT_WIDTH": str_bit_width(init_credit),
+                        "CREDIT_CNT_WIDTH": str(int(init_credit).bit_length()),
                         "TIMER_WIDTH": "5",
                     },
                     {
@@ -439,88 +528,69 @@ def add_credit_control(
                 create_wire_ir(f"{fifo_name}_slave_credit_valid_o", "0", "0"),
                 create_wire_ir(
                     f"{fifo_name}_slave_credit_o",
-                    str_minus_one(str_bit_width(init_credit)),
+                    str((int(init_credit).bit_length() - 1)),
                     "0",
                 ),
             ]
 
-        set_expr(fifo["parameters"], IREnum.DEPTH.value, create_lit_expr(init_credit))
+            # sets the inter-slot FIFO DEPTH
+            set_expr(
+                fifo["parameters"], IREnum.DEPTH.value, create_lit_expr(init_credit)
+            )
 
-    grouped_mod_ir["submodules"] += new_modules
 
-    # add credit control master and slave module definition
+def add_credit_control(
+    ir: dict[str, Any],
+    grouped_mod_name: str,
+    init_credit: str,
+    credit_return: CreditReturnEnum,
+) -> None:
+    """Modifies the Rapidstream IR to add credit-based master and slave controllers.
+
+    Returns None.
+    """
+
+    # the following mutable variables can be modified in place
+    top_ir = parse_top_mod(ir)
+    grouped_mod_ir = parse_mod(ir, grouped_mod_name)
+
+    # adds the reset ports
+    grouped_mod_ir["ports"].append(create_port_ir("ap_rst_n", "input wire", "0", "0"))
+    for m in top_ir["submodules"]:
+        if m["module"] == grouped_mod_name:
+            m["connections"].append(create_port_wire_connection("ap_rst_n", "ap_rst_n"))
+
+    noc_fifos = grouped_mod_ir["submodules"]
+    add_credit_control_master(grouped_mod_ir, init_credit, noc_fifos)
+    # add credit control master module definition
     ir["modules"]["module_definitions"].append(
-        create_credit_control_master(init_credit="15", credit_cnt_width=4)
+        create_credit_control_master({"INIT_CREDIT": "15", "CREDIT_CNT_WIDTH": "4"})
     )
-    ir["modules"]["module_definitions"].append(
-        create_credit_control_slave(
-            init_credit="15", credit_cnt_width=4, timer_width="5"
+
+    # if credit return wires are neither pipelined or put over NoC,
+    # the default is direct connection.
+    if credit_return == CreditReturnEnum.PIPELINE:
+        add_credit_control_slave(grouped_mod_ir, init_credit, noc_fifos)
+        # add credit control slave module definition
+        ir["modules"]["module_definitions"].append(
+            create_credit_control_slave(
+                {"INIT_CREDIT": "15", "CREDIT_CNT_WIDTH": "4", "TIMER_WIDTH": "5"}
+            )
         )
-    )
-
-
-def create_nmu_fifo_ir(
-    fifo: dict[str, Any], fifo_params: dict[str, str], m_axis_ports: dict[str, Any]
-) -> dict[str, Any]:
-    """Create a NMU FIFO IR from the original FIFO.
-
-    Returns a FIFO IR.
-    """
-    nmu_fifo = copy.deepcopy(fifo)
-    nmu_fifo["name"] = "nmu_" + fifo["name"]
-
-    for p in nmu_fifo["parameters"]:
-        # half the depth
-        if p["name"] == IREnum.DEPTH.value:
-            p["expr"] = create_lit_expr(str(int(fifo_params["depth"]) // 2))
-        # remove the body level pipelines
-        elif p["name"] == IREnum.BODY_LEVEL.value:
-            p["expr"] = create_lit_expr("0")
-        # assign NMU fifo regions to head region
-        elif IREnum.REGION.value in p["name"]:
-            p["expr"] = create_lit_expr(fifo_params["head_region"])
-
-    # modify the NMU fifo connections
-    for c in nmu_fifo["connections"]:
-        if c["name"] == IREnum.IF_DOUT.value:
-            c["expr"] = create_id_expr(m_axis_ports["tdata"]["name"])
-        elif c["name"] == IREnum.IF_EMPTY_N.value:
-            c["expr"] = create_id_expr(m_axis_ports["tvalid"]["name"])
-        elif c["name"] == IREnum.IF_READ.value:
-            c["expr"] = create_id_expr(m_axis_ports["tready"]["name"])
-    return nmu_fifo
-
-
-def create_nsu_fifo_ir(
-    fifo: dict[str, Any], fifo_params: dict[str, str], s_axis_ports: dict[str, Any]
-) -> dict[str, Any]:
-    """Create a NSU FIFO IR from the original FIFO.
-
-    Returns a FIFO IR.
-    """
-    nsu_fifo = copy.deepcopy(fifo)
-    nsu_fifo["name"] = "nsu_" + fifo["name"]
-
-    for p in nsu_fifo["parameters"]:
-        # half the depth
-        if p["name"] == IREnum.DEPTH.value:
-            p["expr"] = create_lit_expr(str(int(fifo_params["depth"]) // 2))
-        # remove the body level pipelines
-        elif p["name"] == IREnum.BODY_LEVEL.value:
-            p["expr"] = create_lit_expr("0")
-        # assign NSU fifo regions to tail region
-        elif IREnum.REGION.value in p["name"]:
-            p["expr"] = create_lit_expr(fifo_params["tail_region"])
-
-    # modify the NSU fifo connections
-    for c in nsu_fifo["connections"]:
-        if c["name"] == IREnum.IF_DIN.value:
-            c["expr"] = create_id_expr(s_axis_ports["tdata"]["name"])
-        elif c["name"] == IREnum.IF_FULL_N.value:
-            c["expr"] = create_id_expr(s_axis_ports["tready"]["name"])
-        elif c["name"] == IREnum.IF_WRITE.value:
-            c["expr"] = create_id_expr(s_axis_ports["tvalid"]["name"])
-    return nsu_fifo
+        pipeline_credit_ret(grouped_mod_ir)
+    elif credit_return == CreditReturnEnum.NOC:
+        # add credit control slave module definition
+        ir["modules"]["module_definitions"].append(
+            create_credit_control_slave_group(
+                {
+                    "INIT_CREDIT": "15",
+                    "CREDIT_CNT_WIDTH": "4",
+                    "TIMER_WIDTH": "5",
+                    "GROUP_SIZE": "",
+                }
+            )
+        )
+        credit_ret_over_noc(ir, grouped_mod_name)
 
 
 def noc_rtl_wrapper(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, Any]:
@@ -543,22 +613,83 @@ def noc_rtl_wrapper(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, Any]
         fifo_params = parse_fifo_params(fifo)
 
         # create AXIS-NoC ports
-        m_axis_ports = create_m_axis_ports(fifo["name"], fifo_params["data_width"])
+        m_axis_ports = create_m_axis_ports(
+            fifo["name"], fifo_params[IREnum.DATA_WIDTH.value]
+        )
         axis_noc_ports += list(m_axis_ports.values())
-        s_axis_ports = create_s_axis_ports(fifo["name"], fifo_params["data_width"])
+        s_axis_ports = create_s_axis_ports(
+            fifo["name"], fifo_params[IREnum.DATA_WIDTH.value]
+        )
         axis_noc_ports += list(s_axis_ports.values())
 
         # create the NMU fifo
-        new_modules.append(create_nmu_fifo_ir(fifo, fifo_params, m_axis_ports))
+        # new_modules.append(create_nmu_fifo_ir(fifo, fifo_params, m_axis_ports))
+        new_modules.append(
+            create_module_inst_ir(
+                {
+                    "module_name": IREnum.PIPELINE.value,
+                    "inst_name": f'{IREnum.NMU.value}_{fifo["name"]}',
+                    "pragmas": fifo["pragmas"],
+                },
+                {
+                    "BODY_LEVEL": "0",
+                    "DATA_WIDTH": fifo_params[IREnum.DATA_WIDTH.value],
+                    "DEPTH": str(int(fifo_params[IREnum.DEPTH.value]) // 2),
+                    "EXTRA_PIPELINE_BEFORE_TAIL": "0",
+                    "PIPELINE_READY_IN_HEAD": "1",
+                    "PIPELINE_VALID_AND_DATA_IN_HEAD": "1",
+                }
+                | set_all_pipeline_regions(fifo_params[IREnum.HEAD_REGION.value]),
+                {
+                    "clk": "ap_clk",
+                    "if_read": m_axis_ports["tready"]["name"],
+                    "if_dout": m_axis_ports["tdata"]["name"],
+                    "if_empty_n": m_axis_ports["tvalid"]["name"],
+                    "if_write": find_expr(fifo["connections"], "if_write"),
+                    "if_din": find_expr(fifo["connections"], "if_din"),
+                    "if_full_n": find_expr(fifo["connections"], "if_full_n"),
+                },
+                {"reset": "1'b0"},
+            )
+        )
 
         # create the NSU fifo
-        new_modules.append(create_nsu_fifo_ir(fifo, fifo_params, s_axis_ports))
+        # new_modules.append(create_nsu_fifo_ir(fifo, fifo_params, s_axis_ports))
+        new_modules.append(
+            create_module_inst_ir(
+                {
+                    "module_name": IREnum.PIPELINE.value,
+                    "inst_name": f'{IREnum.NSU.value}_{fifo["name"]}',
+                },
+                {
+                    "BODY_LEVEL": "0",
+                    "DATA_WIDTH": fifo_params[IREnum.DATA_WIDTH.value],
+                    "DEPTH": str(int(fifo_params[IREnum.DEPTH.value]) // 2),
+                    "EXTRA_PIPELINE_BEFORE_TAIL": "0",
+                    "PIPELINE_READY_IN_HEAD": "1",
+                    "PIPELINE_VALID_AND_DATA_IN_HEAD": "1",
+                }
+                | set_all_pipeline_regions(fifo_params[IREnum.TAIL_REGION.value]),
+                {
+                    "clk": "ap_clk",
+                    "if_read": find_expr(fifo["connections"], "if_read"),
+                    "if_dout": find_expr(fifo["connections"], "if_dout"),
+                    "if_empty_n": find_expr(fifo["connections"], "if_empty_n"),
+                    "if_write": s_axis_ports["tvalid"]["name"],
+                    "if_din": s_axis_ports["tdata"]["name"],
+                    "if_full_n": s_axis_ports["tready"]["name"],
+                },
+                {"reset": "1'b0"},
+            )
+        )
 
         # drive tlast with constant 1
         new_modules.append(
             create_module_inst_ir(
-                "Const_1_Driver",
-                f"{fifo['name']}_tlast_inst",
+                {
+                    "module_name": "Const_1_Driver",
+                    "inst_name": f"{fifo['name']}_tlast_inst",
+                },
                 {},
                 {"out": m_axis_ports["tlast"]["name"]},
                 {},
@@ -587,8 +718,7 @@ def noc_rtl_wrapper(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, Any]
     new_ir["modules"]["module_definitions"].append(create_const_one_driver())
 
     # add credit-based controllers to each NMU and NSU FIFOs
-    add_credit_control(new_ir, grouped_mod_name, "12")
-    pipeline_credit_ack(grouped_mod_ir)
+    add_credit_control(new_ir, grouped_mod_name, "12", CreditReturnEnum.PIPELINE)
 
     return new_ir
 
@@ -597,7 +727,7 @@ if __name__ == "__main__":
     import json
     import subprocess
 
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/credit_based"
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/build_a48_grb"
     NOC_PASS_JSON = "noc_pass.json"
     NOC_PASS_WRAPPER_JSON = "noc_pass_wrapper.json"
     with open(f"{TEST_DIR}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:
