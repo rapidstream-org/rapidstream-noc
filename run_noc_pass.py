@@ -74,7 +74,8 @@ Please provide:
     mmap_port_json = sys.argv[3]
     selector = sys.argv[4]
     build_dir = sys.argv[5]
-    top_mod_name = sys.argv[6]
+    if rapidstream_json.endswith(".xo"):
+        top_mod_name = sys.argv[6]
 
     # currently hard-coded parameters
     FREQUENCY = 250.0
