@@ -15,13 +15,13 @@ from enum import Enum, auto
 from device import Device
 from gen_vivado_bd import gen_arm_bd_hbm
 from ir_helper import parse_floorplan, parse_inter_slot, parse_top_mod
-from ir_verilog import noc_rtl_wrapper
 from noc_pass import (
     get_slot_to_noc_nodes,
     greedy_selector,
     ilp_noc_selector,
     random_selector,
 )
+from noc_rtl_wrapper import noc_rtl_wrapper
 from tcl_helper import (
     dump_neg_paths_summary,
     dump_streams_loc_tcl,
@@ -151,8 +151,8 @@ cp {rapidstream_json} {build_dir}/
         for s, w in streams_widths.items():
             streams_bw[s] = w * FREQUENCY / 8
 
-        for a, b in streams_slots.items():
-            print(a, b, streams_widths[a], streams_bw[a])
+        for s, attr in streams_slots.items():
+            print(s, attr, streams_widths[s], streams_bw[s])
         assert len(streams_bw) == len(streams_slots), "parse_inter_slot ERROR"
 
         if selector == SelectorEnum.RANDOM.name:
@@ -178,13 +178,10 @@ cp {rapidstream_json} {build_dir}/
         ) as file:
             json.dump(noc_stream_json, file, indent=4)
 
-        # export noc constraints
-        streams_nodes = get_slot_to_noc_nodes(streams_slots, D)
-        tcl = dump_streams_loc_tcl(streams_nodes, noc_streams)
-        with open(f"{build_dir}/{NOC_CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
-            file.write("\n".join(tcl))
-
+        # generate grouped ir with the selected streams
+        cc_ret_noc_stream: dict[str, dict[str, str]] = {}
         if selector == SelectorEnum.NONE.name:
+            # skip generating grouped ir and wrapper
             assert rapidstream_json.endswith(".xo"), "NONE selector requires .xo input!"
             zsh_cmds = f"""
 unzip {rapidstream_json} -d {build_dir}/tmp
@@ -196,7 +193,6 @@ mv {build_dir}/tmp/ip_repo/*/src {build_dir}/rtl
 rapidstream-exporter -i {rapidstream_json} -f {build_dir}/rtl
 """
         else:
-            # generate grouped ir with the selected streams
             zsh_cmds = f"""
 source ~/.zshrc && amd
 rapidstream-optimizer -i {rapidstream_json} -o {build_dir}/{NOC_PASS_JSON} \
@@ -209,7 +205,11 @@ rapidstream-optimizer -i {rapidstream_json} -o {build_dir}/{NOC_PASS_JSON} \
             with open(f"{build_dir}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:
                 noc_pass_ir = json.load(file)
 
-            noc_pass_wrapper_ir = noc_rtl_wrapper(noc_pass_ir, GROUPED_MOD_NAME)
+            noc_pass_wrapper_ir, cc_ret_noc_stream = noc_rtl_wrapper(
+                noc_pass_ir, GROUPED_MOD_NAME
+            )
+            for s, attr in cc_ret_noc_stream.items():
+                print(f'{s}\t {attr["width"]}\t {attr["bandwidth"]}')
 
             with open(
                 f"{build_dir}/{NOC_PASS_WRAPPER_JSON}", "w", encoding="utf-8"
@@ -219,6 +219,14 @@ rapidstream-optimizer -i {rapidstream_json} -o {build_dir}/{NOC_PASS_JSON} \
             zsh_cmds = f"""
 rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
 """
+
+        # export noc constraints
+        streams_nodes = get_slot_to_noc_nodes(streams_slots | cc_ret_noc_stream, D)
+        tcl = dump_streams_loc_tcl(
+            streams_nodes, noc_streams + list(cc_ret_noc_stream.keys())
+        )
+        with open(f"{build_dir}/{NOC_CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
+            file.write("\n".join(tcl))
 
         # generate rtl folder
         print(zsh_cmds)
@@ -234,11 +242,18 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
 
         noc_stream_attr: dict[str, dict[str, str]] = {}
         for s in noc_streams:
-            noc_stream_attr[f"m_axis_{s}"] = {}
-            noc_stream_attr[f"m_axis_{s}"]["dest"] = f"s_axis_{s}"
-            noc_stream_attr[f"m_axis_{s}"]["bandwidth"] = str(streams_bw[s])
-            # round up to bytes
-            noc_stream_attr[f"m_axis_{s}"]["width"] = str((streams_widths[s] + 7) // 8)
+            noc_stream_attr[f"m_axis_{s}"] = {
+                "dest": f"s_axis_{s}",
+                "bandwidth": str(streams_bw[s]),
+                "width": str((streams_widths[s] + 7) // 8),  # round up to bytes
+            }
+
+        for s, attr in cc_ret_noc_stream.items():
+            noc_stream_attr[f"m_axis_{s}"] = {
+                "dest": f"s_axis_{s}",
+                "bandwidth": attr["bandwidth"],
+                "width": attr["width"],
+            }
 
         tcl = gen_arm_bd_hbm(
             bd_attr=bd_attr,

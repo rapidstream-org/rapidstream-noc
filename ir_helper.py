@@ -26,12 +26,14 @@ class IREnum(Enum):
     IF_DIN = "if_din"
     IF_FULL_N = "if_full_n"
     IF_WRITE = "if_write"
-    NMU = "nmu"
-    NSU = "nsu"
-    CREDIT_CONTROL_MASTER = "_credit_control_master"
+    NMU = "nmu_"
+    NSU = "nsu_"
+    CC_MASTER = "_cc_master"
+    CC_RET = "_cc_ret"
     RS_ROUTE = "RS_ROUTE"
     FLOORPLAN_REGION = "floorplan_region"
     PRAGMAS = "pragmas"
+    LIT = "lit"
 
 
 class CreditReturnEnum(Enum):
@@ -52,6 +54,15 @@ def extract_slot_coord(slot_name: str) -> tuple[int, int]:
     (0, 1)
     """
     return int(slot_name.split("X")[1].split("Y")[0]), int(slot_name.split("Y")[1])
+
+
+def split_slot_region(region: str) -> str:
+    """Splits the slot region and returns the first slot.
+
+    Returns a string.
+    """
+    assert region.split("_TO_")[0] == region.split("_TO_")[1]
+    return region.split("_TO_")[0]
 
 
 def extract_slot_range(slot_range: str) -> list[tuple[int, int]]:
@@ -226,12 +237,35 @@ def create_lit_expr(val: str) -> list[dict[str, str]]:
     return [{"type": "lit", "repr": val}]
 
 
-def create_id_expr(val: str) -> list[dict[str, str]]:
+def create_id_expr(val: list[str]) -> list[dict[str, str]]:
     """Create an "id" type expr dictionary.
 
     Returns a list of dictionary.
     """
-    return [{"type": "id", "repr": val}]
+    if len(val) == 1:
+        return [{"type": "id", "repr": val[0]}]
+
+    expr = [{"type": "lit", "repr": "{"}]
+    for i, v in enumerate(val):
+        expr += [{"type": "id", "repr": v}]
+        if i < len(val) - 1:
+            expr += [{"type": "lit", "repr": ","}]
+    return expr + [{"type": "lit", "repr": "}"}]
+
+
+def create_id_expr_slice(val: str, left: str, right: str) -> list[dict[str, str]]:
+    """Create an "id" type expr with slice[:] dictionary.
+
+    Returns a list of dictionary.
+    """
+    return [
+        {"type": "id", "repr": val},
+        {"type": "lit", "repr": "["},
+        {"type": "lit", "repr": left},
+        {"type": "lit", "repr": ":"},
+        {"type": "lit", "repr": right},
+        {"type": "lit", "repr": "]"},
+    ]
 
 
 def set_expr(source: list[dict[str, Any]], key: str, val: list[dict[str, str]]) -> None:
@@ -277,9 +311,7 @@ def create_port_ir(
     return new_port
 
 
-def create_port_wire_connection(
-    port_name: str, wire: str | list[dict[str, str]]
-) -> dict[str, Any]:
+def create_port_wire_connection(port_name: str, wire: list[str]) -> dict[str, Any]:
     """Create a port connection to a wire.
 
     Returns a dictionary.
@@ -287,7 +319,7 @@ def create_port_wire_connection(
     return {
         "name": port_name,
         "hierarchical_name": [port_name],
-        "expr": create_id_expr(wire) if isinstance(wire, str) else wire,
+        "expr": create_id_expr(wire),
     }
 
 
@@ -331,12 +363,24 @@ def find_expr(
 
 
 def find_repr(source: list[dict[str, Any]], key: str) -> str:
-    """Finds the first type id repr value of a key in the Rapidstream list IR.
+    """Finds the first type repr value of a key in the Rapidstream list IR.
 
     Returns a string.
     """
     for e in find_expr(source, key):
         return str(e["repr"])
+    print(f"WARNING: repr for key {key} not found!")
+    return ""
+
+
+def find_repr_id(source: list[dict[str, Any]], key: str) -> str:
+    """Finds the first id-type repr value of a key in the Rapidstream list IR.
+
+    Returns a string.
+    """
+    for e in find_expr(source, key):
+        if e["type"] != IREnum.LIT.value:
+            return str(e["repr"])
     print(f"WARNING: repr for key {key} not found!")
     return ""
 
@@ -374,7 +418,7 @@ def create_s_axis_ports(name: str, datawidth: str) -> dict[str, dict[str, Any]]:
 def create_module_inst_ir(
     module_str_config: dict[str, str],
     params: dict[str, str],
-    wire_connections: dict[str, str | list[dict[str, str]]],
+    wire_connections: dict[str, list[str]],
     const_connections: dict[str, str],
 ) -> dict[str, Any]:
     """Create a module's instance IR with port connections.
@@ -419,10 +463,8 @@ def parse_fifo_params(fifo: dict[str, Any]) -> dict[str, str]:
     for p in fifo["parameters"]:
         if p["name"] == IREnum.DEPTH.value:
             params[IREnum.DEPTH.value] = str(eval_id_expr(p["expr"]))
-        elif p["name"] == IREnum.HEAD_REGION.value:
-            params[IREnum.HEAD_REGION.value] = p["expr"][0]["repr"]
-        elif p["name"] == IREnum.TAIL_REGION.value:
-            params[IREnum.TAIL_REGION.value] = p["expr"][0]["repr"]
+        elif p["name"] in {IREnum.HEAD_REGION.value, IREnum.TAIL_REGION.value}:
+            params[p["name"]] = p["expr"][0]["repr"].strip('"')
         elif p["name"] == IREnum.DATA_WIDTH.value:
             # assumes that we are discarding the eot bit in streams
             params[IREnum.DATA_WIDTH.value] = str(eval_id_expr(p["expr"]) - 1)
@@ -456,7 +498,7 @@ def set_all_pipeline_regions(region: str) -> dict[str, str]:
         IREnum.HEAD_REGION.value,
         IREnum.TAIL_REGION.value,
     ]
-    return {r: region for r in region_params}
+    return {r: f'"{region}"' for r in region_params}
 
 
 def get_credit_return_regions(fifo_route: list[str]) -> dict[str, str]:
