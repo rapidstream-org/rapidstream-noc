@@ -137,9 +137,9 @@ cp {rapidstream_json} {build_dir}/
             subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
     # Main algorithm: select streams for NoC
-    if selector in (SelectorEnum.NONE.name, SelectorEnum.EMPTY.name):
+    if selector == SelectorEnum.NONE.name:
         streams_slots: dict[str, dict[str, str]] = {}
-        noc_streams = []
+        noc_streams: list[str] = []
     else:
         with open(rapidstream_json, "r", encoding="utf-8") as file:
             rapidstream_ir = json.load(file)
@@ -155,7 +155,9 @@ cp {rapidstream_json} {build_dir}/
             print(s, attr, streams_widths[s], streams_bw[s])
         assert len(streams_bw) == len(streams_slots), "parse_inter_slot ERROR"
 
-        if selector == SelectorEnum.RANDOM.name:
+        if selector == SelectorEnum.EMPTY.name:
+            noc_streams = []
+        elif selector == SelectorEnum.RANDOM.name:
             noc_streams = random_selector(streams_slots, D)
         elif selector == SelectorEnum.GREEDY.name:
             noc_streams = greedy_selector(streams_slots, D)
