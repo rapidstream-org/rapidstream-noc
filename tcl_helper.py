@@ -86,10 +86,10 @@ def export_noc_constraint(
     # find all unique slots
     unique_slots = []
     keys = ["src", "dest"]
-    for _, d in streams_slots.items():
+    for s in noc_streams:
         for k in keys:
-            if d[k] not in unique_slots:
-                unique_slots.append(d[k])
+            if streams_slots[s][k] not in unique_slots:
+                unique_slots.append(streams_slots[s][k])
 
     keys = ["nmu", "nsu"]
     for slot in unique_slots:
@@ -108,7 +108,7 @@ resize_pblock {slot}_nsu -add {{{slot_nsu_nodes}}}
     for port_num, s in enumerate(noc_streams):
         tcl += [
             f"""\
-add_cells_to_pblock {streams_slots[s]["src"]}_nsu get_cells */axis_noc_dut/inst/\
+add_cells_to_pblock {streams_slots[s]["src"]}_nsu [get_cells */axis_noc_dut/inst/\
 M{str(port_num).zfill(2)}_AXIS_nsu/*top_INST/NOC_NSU512_INST]
 add_cells_to_pblock {streams_slots[s]["dest"]}_nmu [get_cells */axis_noc_dut/inst/\
 S{str(port_num).zfill(2)}_AXIS_nmu/*top_INST/NOC_NMU512_INST]"""
