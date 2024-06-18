@@ -9,6 +9,8 @@ RapidStream Contributor License Agreement.
 from enum import Enum, auto
 from typing import Any
 
+from device import Device
+
 
 class IREnum(Enum):
     """Enums to parse Rapidstream NOC IR."""
@@ -94,6 +96,34 @@ def extract_slot_range(slot_range: str) -> list[tuple[int, int]]:
         for y in range(lly, ury + 1):
             slots.append((x, y))
     return slots
+
+
+def get_slot_nodes(slot_range: str, node_type: str, device: Device) -> list[str]:
+    """Convert each slotname in the streams dict to a list of NMU and NSU nodes.
+
+    Returns a new dictionary with 'src' and 'dest' list of nodes for each stream.
+    """
+    nodes = []
+    for x, y in extract_slot_range(slot_range):
+        nodes += device.get_nmu_or_nsu_names_in_slot(node_type, x, y)
+    return nodes
+
+
+def get_slot_to_noc_nodes(
+    streams_slots: dict[str, dict[str, str]], device: Device
+) -> dict[str, dict[str, list[str]]]:
+    """Converts the slot name of each stream to all NMU or NSU nodes in that slot.
+
+    Returns a dictionary with each slot name replaced by a list NMU/NSU nodes names.
+    """
+    streams_nodes: dict[str, dict[str, list[str]]] = {}
+    # expands each slot range to a list of node names
+    for stream_name, slots in streams_slots.items():
+        streams_nodes[stream_name] = {
+            "src": get_slot_nodes(slots["src"], "nmu", device),
+            "dest": get_slot_nodes(slots["dest"], "nsu", device),
+        }
+    return streams_nodes
 
 
 def parse_top_mod(ir: dict[str, Any]) -> Any:

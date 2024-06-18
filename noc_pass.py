@@ -14,7 +14,7 @@ from pulp import GUROBI_CMD, LpMinimize, LpProblem, LpVariable, lpSum
 from pydantic import BaseModel, ConfigDict
 
 from device import Device
-from ir_helper import extract_slot_coord, extract_slot_range
+from ir_helper import extract_slot_coord, extract_slot_range, get_slot_to_noc_nodes
 from tcl_helper import print_noc_loc_tcl
 
 
@@ -135,34 +135,6 @@ def greedy_selector(
     print(f"greedy selector has selected {len(selected_streams)} streams.")
     print("slot usage", get_streams_noc_area(selected_streams, device))
     return list(selected_streams.keys())
-
-
-def get_slot_nodes(slot_range: str, node_type: str, device: Device) -> list[str]:
-    """Convert each slotname in the streams dict to a list of NMU and NSU nodes.
-
-    Returns a new dictionary with 'src' and 'dest' list of nodes for each stream.
-    """
-    nodes = []
-    for x, y in extract_slot_range(slot_range):
-        nodes += device.get_nmu_or_nsu_names_in_slot(node_type, x, y)
-    return nodes
-
-
-def get_slot_to_noc_nodes(
-    streams_slots: dict[str, dict[str, str]], device: Device
-) -> dict[str, dict[str, list[str]]]:
-    """Converts the slot name of each stream to all NMU or NSU nodes in that slot.
-
-    Returns a dictionary with each slot name replaced by a list NMU/NSU nodes names.
-    """
-    streams_nodes: dict[str, dict[str, list[str]]] = {}
-    # expands each slot range to a list of node names
-    for stream_name, slots in streams_slots.items():
-        streams_nodes[stream_name] = {
-            "src": get_slot_nodes(slots["src"], "nmu", device),
-            "dest": get_slot_nodes(slots["dest"], "nsu", device),
-        }
-    return streams_nodes
 
 
 def get_stream_manhattan_dist(

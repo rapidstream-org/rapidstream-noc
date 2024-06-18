@@ -15,17 +15,13 @@ from enum import Enum, auto
 from device import Device
 from gen_vivado_bd import gen_arm_bd_hbm
 from ir_helper import parse_floorplan, parse_inter_slot, parse_top_mod
-from noc_pass import (
-    get_slot_to_noc_nodes,
-    greedy_selector,
-    ilp_noc_selector,
-    random_selector,
-)
+from noc_pass import greedy_selector, ilp_noc_selector, random_selector
 from noc_rtl_wrapper import noc_rtl_wrapper
 from tcl_helper import (
     dump_neg_paths_summary,
     dump_streams_loc_tcl,
     export_constraint,
+    export_noc_constraint,
     gen_vivado_prj_tcl,
     parse_neg_paths,
 )
@@ -223,9 +219,10 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
 """
 
         # export noc constraints
-        streams_nodes = get_slot_to_noc_nodes(streams_slots | cc_ret_noc_stream, D)
         tcl = dump_streams_loc_tcl(
-            streams_nodes, noc_streams + list(cc_ret_noc_stream.keys())
+            streams_slots | cc_ret_noc_stream,
+            noc_streams + list(cc_ret_noc_stream.keys()),
+            D,
         )
         with open(f"{build_dir}/{NOC_CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
@@ -269,6 +266,12 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
         if selector == SelectorEnum.NONE.name:
             tcl = []
         else:
+            tcl = export_noc_constraint(
+                streams_slots | cc_ret_noc_stream,
+                noc_streams + list(cc_ret_noc_stream.keys()),
+                D,
+            )
+
             final_ir = (
                 rapidstream_json
                 if selector == SelectorEnum.EMPTY.name
@@ -281,7 +284,7 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
             print("Number of modules:", sum(len(v) for v in floorplan.values()))
             print("Used slots: ", floorplan.keys())
 
-            tcl = export_constraint(floorplan, D)
+            tcl += export_constraint(floorplan, D)
 
         with open(f"{build_dir}/{CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))

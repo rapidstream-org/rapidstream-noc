@@ -9,7 +9,7 @@ RapidStream Contributor License Agreement.
 import re
 
 from device import Device
-from ir_helper import extract_slot_coord
+from ir_helper import extract_slot_coord, get_slot_nodes
 
 
 def print_noc_loc_tcl(node_loc: dict[str, tuple[str, str]]) -> None:
@@ -33,34 +33,85 @@ def print_noc_loc_tcl(node_loc: dict[str, tuple[str, str]]) -> None:
     print("\n".join(tcl))
 
 
+def concat_slot_nodes(slot: str, node_type: str, sep: str, device: Device) -> str:
+    """Get the all NMU/NSU nodes in a slot concatenated with ":".
+
+    Returns a str.
+    """
+
+    def split_x_y(name: str) -> tuple[str, str]:
+        x, y = name.split("x")[1].split("y")
+        return x, y
+
+    slot_nodes = []
+    for n in get_slot_nodes(slot, node_type, device):
+        x, y = split_x_y(n)
+        slot_nodes.append(f"NOC_{node_type.upper()}512_X{x}Y{y}")
+    return sep.join(slot_nodes)
+
+
 def dump_streams_loc_tcl(
-    streams_nodes: dict[str, dict[str, list[str]]], noc_streams: list[str]
+    streams_slots: dict[str, dict[str, str]], noc_streams: list[str], device: Device
 ) -> list[str]:
     """Dumps the NoC streams' NMU and NSU location tcl.
 
     Return a list of tcl commands.
     """
     tcl = []
-    for port_num, s in enumerate(noc_streams):
-        slot_nmu_nodes = []
-        slot_nsu_nodes = []
-        for n in streams_nodes[s]["src"]:
-            nmu_x, nmu_y = n.split("x")[1].split("y")
-            slot_nmu_nodes.append(f"NOC_NMU512_X{nmu_x}Y{nmu_y}")
-        for n in streams_nodes[s]["dest"]:
-            nsu_x, nsu_y = n.split("x")[1].split("y")
-            slot_nsu_nodes.append(f"NOC_NSU512_X{nsu_x}Y{nsu_y}")
 
-        slot_nmu_nodes_str = ":".join(slot_nmu_nodes)
-        slot_nsu_nodes_str = ":".join(slot_nsu_nodes)
+    for port_num, s in enumerate(noc_streams):
+        slot_nmu_nodes = concat_slot_nodes(streams_slots[s]["src"], "nmu", ":", device)
+        slot_nsu_nodes = concat_slot_nodes(streams_slots[s]["dest"], "nsu", ":", device)
 
         tcl += [
             f"""
-set_property -dict [list CONFIG.PHYSICAL_LOC {{{slot_nmu_nodes_str}}}] \
+set_property -dict [list CONFIG.PHYSICAL_LOC {{{slot_nmu_nodes}}}] \
     [get_bd_intf_pins /axis_noc_dut/S{str(port_num).zfill(2)}_AXIS]
-set_property -dict [list CONFIG.PHYSICAL_LOC {{{slot_nsu_nodes_str}}}] \
+set_property -dict [list CONFIG.PHYSICAL_LOC {{{slot_nsu_nodes}}}] \
     [get_bd_intf_pins /axis_noc_dut/M{str(port_num).zfill(2)}_AXIS]
 """
+        ]
+    return tcl
+
+
+def export_noc_constraint(
+    streams_slots: dict[str, dict[str, str]], noc_streams: list[str], device: Device
+) -> list[str]:
+    """Dumps the NoC streams' NMU and NSU location tcl.
+
+    Return a list of tcl commands.
+    """
+    tcl = []
+    # create NoC pblock
+    # find all unique slots
+    unique_slots = []
+    keys = ["src", "dest"]
+    for _, d in streams_slots.items():
+        for k in keys:
+            if d[k] not in unique_slots:
+                unique_slots.append(d[k])
+
+    keys = ["nmu", "nsu"]
+    for slot in unique_slots:
+        slot_nmu_nodes = concat_slot_nodes(slot, "nmu", " ", device)
+        slot_nsu_nodes = concat_slot_nodes(slot, "nsu", " ", device)
+        tcl += [
+            f"""
+# begin defining a slot for logic resources
+create_pblock {slot}_nmu
+resize_pblock {slot}_nmu -add {{{slot_nmu_nodes}}}
+create_pblock {slot}_nsu
+resize_pblock {slot}_nsu -add {{{slot_nsu_nodes}}}
+"""
+        ]
+
+    for port_num, s in enumerate(noc_streams):
+        tcl += [
+            f"""\
+add_cells_to_pblock {streams_slots[s]["src"]}_nsu get_cells */axis_noc_dut/inst/\
+M{str(port_num).zfill(2)}_AXIS_nsu/*top_INST/NOC_NSU512_INST]
+add_cells_to_pblock {streams_slots[s]["dest"]}_nmu [get_cells */axis_noc_dut/inst/\
+S{str(port_num).zfill(2)}_AXIS_nmu/*top_INST/NOC_NMU512_INST]"""
         ]
     return tcl
 
@@ -163,7 +214,7 @@ set_property IOSTANDARD LVDCI_15 [get_ports pl0_resetn_0]
         cr = device.get_slot_cr(x, y)
         tcl += [
             f"""
-# begin defining a slot
+# begin defining a slot for logic resources
 create_pblock {slot}
 resize_pblock {slot} -add {cr}
 """
@@ -177,12 +228,6 @@ resize_pblock {slot} -add {cr}
 
     tcl += [
         """
-foreach pblock [get_pblocks -regexp SLOT_X\\\\d+Y\\\\d+_To_SLOT_X\\\\d+Y\\\\d+] {
-  if {[get_property CELL_COUNT $pblock] == 0} {
-    puts "WARNING: delete empty pblock $pblock "
-    delete_pblocks $pblock
-  }
-}
 foreach pblock [get_pblocks] {
   report_utilization -pblocks $pblock
 }
