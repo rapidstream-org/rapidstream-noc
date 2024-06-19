@@ -510,7 +510,7 @@ def add_credit_control(
 
     # if credit return wires are neither pipelined or put over NoC,
     # the default is direct connection.
-    if credit_return == CreditReturnEnum.PIPELINE:
+    if credit_return != CreditReturnEnum.NOC:
         add_cc_slave(grouped_mod_ir, init_credit, timer_width)
         # add credit control slave module definition
         ir["modules"]["module_definitions"].append(
@@ -518,19 +518,20 @@ def add_credit_control(
                 {"INIT_CREDIT": "15", "CREDIT_CNT_WIDTH": "4", "TIMER_WIDTH": "5"}
             )
         )
-        pipeline_credit_ret(grouped_mod_ir)
-    elif credit_return == CreditReturnEnum.NOC:
-        srcdest_fifos = add_cc_slave_group(grouped_mod_ir, init_credit, timer_width)
-        # add credit control slave module definition
-        ir["modules"]["module_definitions"].append(
-            create_cc_slave_group(
-                {
-                    "INIT_CREDIT": "15",
-                    "CREDIT_CNT_WIDTH": "4",
-                    "TIMER_WIDTH": "5",
-                    "GROUP_SIZE": "4",
-                }
-            )
+        if credit_return == CreditReturnEnum.PIPELINE:
+            pipeline_credit_ret(grouped_mod_ir)
+        return {}
+
+    srcdest_fifos = add_cc_slave_group(grouped_mod_ir, init_credit, timer_width)
+    # add credit control slave module definition
+    ir["modules"]["module_definitions"].append(
+        create_cc_slave_group(
+            {
+                "INIT_CREDIT": "15",
+                "CREDIT_CNT_WIDTH": "4",
+                "TIMER_WIDTH": "5",
+                "GROUP_SIZE": "4",
+            }
         )
-        return credit_ret_over_noc(ir, grouped_mod_name, init_credit, srcdest_fifos)
-    return {}
+    )
+    return credit_ret_over_noc(ir, grouped_mod_name, init_credit, srcdest_fifos)

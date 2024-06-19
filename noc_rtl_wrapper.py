@@ -9,9 +9,7 @@ RapidStream Contributor License Agreement.
 import copy
 from typing import Any
 
-from ir_credit_based import add_credit_control
 from ir_helper import (
-    CreditReturnEnum,
     IREnum,
     create_m_axis_ports,
     create_module_inst_ir,
@@ -151,9 +149,10 @@ def noc_rtl_wrapper(
     new_ir["modules"]["module_definitions"].append(create_const_one_driver())
 
     # add credit-based controllers to each NMU and NSU FIFOs
-    cc_ret_noc_stream = add_credit_control(
-        new_ir, grouped_mod_name, "12", "5", CreditReturnEnum.NOC
-    )
+    cc_ret_noc_stream: dict[str, dict[str, str]] = {}  # no credit controllers
+    # cc_ret_noc_stream = add_credit_control(
+    #     new_ir, grouped_mod_name, "12", "5", CreditReturnEnum.NOC
+    # )
 
     return new_ir, cc_ret_noc_stream
 
@@ -162,7 +161,7 @@ if __name__ == "__main__":
     import json
     import subprocess
 
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/credit_based"
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/build_a48_grb"
     NOC_PASS_JSON = "noc_pass.json"
     NOC_PASS_WRAPPER_JSON = "noc_pass_wrapper.json"
     with open(f"{TEST_DIR}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:
