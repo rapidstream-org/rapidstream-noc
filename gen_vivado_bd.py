@@ -28,8 +28,6 @@ from vivado_bd_helper import (
     arm_hbm_tcl,
     arm_tcl,
     assign_arm_bd_address,
-    assign_mb_bd_address,
-    mb_tcl,
     proc_tcl,
 )
 
@@ -373,44 +371,11 @@ connect_bd_net [get_bd_pins dut_0/interrupt] [get_bd_pins axi_intc_0/intr]
     return tcl
 
 
-def gen_mb_bd(
-    bd_name: str,
-    top_mod: str,
-    mmap_ports: dict[str, dict[str, int]],
-    stream_attr: dict[str, dict[str, str]],
-) -> list[str]:
-    """Generates Vivado block design with Microblaze.
-
-    Merges the tcl commands from the helper functions and dumps to a file.
-
-    Args:
-        bd_name:        name of the block design.
-        top_mod:        name of the top-level module.
-        mmap_ports:     list of top-level mmap ports connected to the memory.
-        stream_attr:    dictionary of top-level stream ports. Keys are "src" name.
-                        Values are "dest" name, "bandwidth", and "width".
-
-    Returns a list of tcl commands.
-    """
-    tcl = []
-    tcl += proc_tcl()
-    tcl += mb_tcl(bd_name)
-    tcl += dut_tcl(
-        top_mod,
-        mmap_ports,
-        stream_attr,
-        False,
-        "",
-    )
-    tcl += connect_dut_mb_tcl(stream_attr)
-    tcl += assign_mb_bd_address()
-    return tcl
-
-
 def gen_arm_bd_ddr(
     bd_attr: dict[str, str],
     mmap_ports: dict[str, dict[str, int]],
     stream_attr: dict[str, dict[str, str]],
+    fpd: bool,
 ) -> list[str]:
     """Generates Vivado block design with ARM and LPDDR.
 
@@ -423,12 +388,15 @@ def gen_arm_bd_ddr(
         mmap_ports:     list of top-level mmap ports connected to the memory.
         stream_attr:    dictionary of top-level stream ports. Keys are "src" name.
                         Values are "dest" name, "bandwidth", and "width".
+        fpd:            True if using CIPS M_AXI_FPD for kernel's control_s_axi,
+                        else uses CIPS LPD_AXI_NOC_0 with NoC.
+
 
     Returns a list of tcl commands.
     """
     tcl = []
     tcl += proc_tcl()
-    tcl += arm_tcl(bd_attr["bd_name"], bd_attr["frequency"], False)
+    tcl += arm_tcl(bd_attr["bd_name"], bd_attr["frequency"], False, fpd)
     tcl += arm_ddr_tcl()
     tcl += dut_tcl(
         bd_attr["top_mod"],
@@ -446,6 +414,7 @@ def gen_arm_bd_hbm(
     bd_attr: dict[str, str],
     mmap_ports: dict[str, dict[str, int]],
     stream_attr: dict[str, dict[str, str]],
+    fpd: bool,
 ) -> list[str]:
     """Generates Vivado block design with ARM and HBM.
 
@@ -459,13 +428,16 @@ def gen_arm_bd_hbm(
         mmap_ports:     list of top-level mmap ports connected to the memory.
         stream_attr:    dictionary of top-level stream ports. Keys are "src" name.
                         Values are "dest" name, "bandwidth", and "width".
+        fpd:            True if using CIPS M_AXI_FPD for kernel's control_s_axi,
+                        else uses CIPS LPD_AXI_NOC_0 with NoC.
+
 
     Returns a list of tcl commands.
     """
     tcl = []
     tcl += proc_tcl()
-    tcl += arm_tcl(bd_attr["bd_name"], bd_attr["frequency"], True)
-    tcl += arm_hbm_tcl(mmap_ports)
+    tcl += arm_tcl(bd_attr["bd_name"], bd_attr["frequency"], True, fpd)
+    tcl += arm_hbm_tcl(mmap_ports, fpd)
     tcl += dut_tcl(
         bd_attr["top_mod"],
         mmap_ports,
@@ -487,6 +459,7 @@ if __name__ == "__main__":
     NOC_STREAM_ATTR_JSON = "noc_streams_attr.json"
     VIVADO_BD_TCL = "arm_bd.tcl"
     BD_NAME = "top_arm"
+    USE_M_AXI_FPD = False
     IMPL_FREQUENCY = "300.0"
     HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
     with open(f"{TEST_DIR}/{I_ADD_PIPELINE_JSON}", "r", encoding="utf-8") as file:
@@ -506,6 +479,7 @@ if __name__ == "__main__":
         },
         test_mmap,
         test_stream_attr,
+        USE_M_AXI_FPD,
     )
 
     with open(f"{TEST_DIR}/{VIVADO_BD_TCL}", "w", encoding="utf-8") as file:

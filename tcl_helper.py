@@ -193,7 +193,9 @@ close_project
     return tcl
 
 
-def export_constraint(floorplan: dict[str, list[str]], device: Device) -> list[str]:
+def export_constraint(
+    floorplan: dict[str, list[str]], fpd: bool, device: Device
+) -> list[str]:
     """Generates tcl constraints given the floorplan dictionary.
 
     Returns a list of tcl commands.
@@ -207,6 +209,30 @@ set_property PACKAGE_PIN BR53 [get_ports pl0_resetn_0]
 set_property IOSTANDARD LVDCI_15 [get_ports pl0_resetn_0]
 """
     ]
+
+    # constraint for control_s_axi's NSU
+    # find the control_s_axi slot region
+    def find_key_with_substring(floorplan: dict[str, list[str]], substring: str) -> str:
+        for slot, mods in floorplan.items():
+            if any(substring in e for e in mods):
+                return slot
+        raise NotImplementedError
+
+    if not fpd:
+        control_slot = find_key_with_substring(floorplan, "control_s_axi")
+        slot_nsu_nodes = concat_slot_nodes(control_slot, "nsu", " ", device)
+        tcl += [
+            f"""
+set control_nsu_pblock [get_pblocks {control_slot}_nsu]
+if {{[llength $control_nsu_pblock] == 0}} {{
+    create_pblock {control_slot}_nsu
+    resize_pblock {control_slot}_nsu -add {{{slot_nsu_nodes}}}
+}}
+add_cells_to_pblock {control_slot}_nsu \
+[get_cells */noc_hbm_0/inst/M00_AXI_nsu/*top_INST/NOC_NSU512_INST]
+"""
+        ]
+
     for slot in floorplan.keys():
         slot1, slot2 = slot.split("_TO_")
         assert slot1 == slot2
@@ -312,97 +338,59 @@ def parse_neg_paths(
 
 
 if __name__ == "__main__":
-    import subprocess
+    import json
 
+    from ir_helper import parse_floorplan, parse_inter_slot, parse_top_mod
+    from vh1582_nocgraph import vh1582_nocgraph
+
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/tmp"
+    USE_M_AXI_FPD = False
+    I_ADD_PIPELINE_JSON = "add_pipeline.json"
+    SELECTED_STREAMS_JSON = "noc_streams.json"
+    NOC_PASS_WRAPPER_JSON = "noc_pass_wrapper.json"
+    CONSTRAINT_TCL = "constraint.tcl"
     DUMP_NEG_PATHS_TCL = "dump_neg_paths.tcl"
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/build_a48_empty"
-    test_tcl = dump_neg_paths_summary(TEST_DIR)
-    with open(f"{TEST_DIR}/{DUMP_NEG_PATHS_TCL}", "w", encoding="utf-8") as file:
+    GROUPED_MOD_NAME = "axis_noc_if"
+
+    G = vh1582_nocgraph()
+    D = Device(
+        part_num="PART_NUM",
+        board_part="BOARD_PART",
+        slot_width=2,
+        slot_height=2,
+        noc_graph=G,
+        nmu_per_slot=[],  # generated
+        nsu_per_slot=[],  # generated
+        cr_mapping=[
+            ["CLOCKREGION_X0Y1:CLOCKREGION_X4Y4", "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7"],
+            ["CLOCKREGION_X5Y1:CLOCKREGION_X9Y4", "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7"],
+        ],
+    )
+
+    with open(f"{TEST_DIR}/{I_ADD_PIPELINE_JSON}", "r", encoding="utf-8") as file:
+        test_design = json.load(file)
+    with open(f"{TEST_DIR}/{NOC_PASS_WRAPPER_JSON}", "r", encoding="utf-8") as file:
+        noc_pass_wrapper_ir = json.load(file)
+    with open(f"{TEST_DIR}/{SELECTED_STREAMS_JSON}", "r", encoding="utf-8") as file:
+        test_noc_streams = json.load(file)[GROUPED_MOD_NAME]
+
+    test_streams_slots, _ = parse_inter_slot(parse_top_mod(test_design))
+    test_floorplan = parse_floorplan(noc_pass_wrapper_ir, GROUPED_MOD_NAME)
+
+    test_tcl = export_noc_constraint(test_streams_slots, test_noc_streams, D)
+    test_tcl += export_constraint(test_floorplan, USE_M_AXI_FPD, D)
+    with open(f"{TEST_DIR}/{CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
         file.write("\n".join(test_tcl))
 
-    zsh_cmds = f"""
-source ~/.zshrc && amd
-vivado -mode batch -source {TEST_DIR}/{DUMP_NEG_PATHS_TCL}
-"""
-    print(zsh_cmds)
-    subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+#     test_tcl = dump_neg_paths_summary(TEST_DIR)
+#     with open(f"{TEST_DIR}/{DUMP_NEG_PATHS_TCL}", "w", encoding="utf-8") as file:
+#         file.write("\n".join(test_tcl))
 
-    inter_slot_fifos = [
-        "PE_inst_Serpens_11_hs_if_din",
-        "PE_inst_Serpens_26_hs_if_din",
-        "PE_inst_Serpens_33_hs_if_din",
-        "Yvec_inst_Serpens_2_hs_if_din",
-        "Yvec_inst_Serpens_8_hs_if_din",
-        "fifo_A_Serpens_0_hs_if_din",
-        "fifo_A_Serpens_10_hs_if_din",
-        "fifo_A_Serpens_1_hs_if_din",
-        "fifo_A_Serpens_2_hs_if_din",
-        "fifo_A_Serpens_33_hs_if_din",
-        "fifo_A_Serpens_34_hs_if_din",
-        "fifo_A_Serpens_35_hs_if_din",
-        "fifo_A_Serpens_36_hs_if_din",
-        "fifo_A_Serpens_37_hs_if_din",
-        "fifo_A_Serpens_38_hs_if_din",
-        "fifo_A_Serpens_39_hs_if_din",
-        "fifo_A_Serpens_3_hs_if_din",
-        "fifo_A_Serpens_40_hs_if_din",
-        "fifo_A_Serpens_41_hs_if_din",
-        "fifo_A_Serpens_42_hs_if_din",
-        "fifo_A_Serpens_43_hs_if_din",
-        "fifo_A_Serpens_44_hs_if_din",
-        "fifo_A_Serpens_45_hs_if_din",
-        "fifo_A_Serpens_46_hs_if_din",
-        "fifo_A_Serpens_47_hs_if_din",
-        "fifo_A_Serpens_4_hs_if_din",
-        "fifo_A_Serpens_5_hs_if_din",
-        "fifo_A_Serpens_6_hs_if_din",
-        "fifo_A_Serpens_7_hs_if_din",
-        "fifo_A_Serpens_8_hs_if_din",
-        "fifo_A_Serpens_9_hs_if_din",
-        "fifo_X_pe_Serpens_11_hs_if_din",
-        "fifo_X_pe_Serpens_26_hs_if_din",
-        "fifo_X_pe_Serpens_33_hs_if_din",
-        "fifo_Y_pe_Serpens_11_hs_if_din",
-        "fifo_Y_pe_Serpens_12_hs_if_din",
-        "fifo_Y_pe_Serpens_13_hs_if_din",
-        "fifo_Y_pe_Serpens_14_hs_if_din",
-        "fifo_Y_pe_Serpens_15_hs_if_din",
-        "fifo_Y_pe_Serpens_16_hs_if_din",
-        "fifo_Y_pe_Serpens_17_hs_if_din",
-        "fifo_Y_pe_Serpens_24_hs_if_din",
-        "fifo_Y_pe_Serpens_25_hs_if_din",
-        "fifo_Y_pe_Serpens_2_hs_if_din",
-        "fifo_Y_pe_Serpens_33_hs_if_din",
-        "fifo_Y_pe_Serpens_34_hs_if_din",
-        "fifo_Y_pe_Serpens_35_hs_if_din",
-        "fifo_Y_pe_Serpens_8_hs_if_din",
-        "fifo_Y_pe_abd_Serpens_3_hs_if_din",
-        "fifo_Y_pe_abd_Serpens_6_hs_if_din",
-        "fifo_Y_pe_abd_Serpens_7_hs_if_din",
-        "fifo_aXvec_Serpens_2_hs_if_din",
-        "fifo_aXvec_Serpens_8_hs_if_din",
-    ]
+#     zsh_cmds = f"""
+# source ~/.zshrc && amd
+# vivado -mode batch -source {TEST_DIR}/{DUMP_NEG_PATHS_TCL}
+# """
+#     print(zsh_cmds)
+#     subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
-    selected = [
-        "PE_inst_Serpens_11_hs_if_din",
-        "Yvec_inst_Serpens_8_hs_if_din",
-        "fifo_A_Serpens_0_hs_if_din",
-        "fifo_A_Serpens_2_hs_if_din",
-        "fifo_A_Serpens_39_hs_if_din",
-        "fifo_A_Serpens_3_hs_if_din",
-        "fifo_A_Serpens_43_hs_if_din",
-        "fifo_A_Serpens_47_hs_if_din",
-        "fifo_A_Serpens_7_hs_if_din",
-        "fifo_X_pe_Serpens_11_hs_if_din",
-        "fifo_X_pe_Serpens_26_hs_if_din",
-        "fifo_X_pe_Serpens_33_hs_if_din",
-        "fifo_Y_pe_Serpens_2_hs_if_din",
-        "fifo_Y_pe_Serpens_33_hs_if_din",
-        "fifo_Y_pe_Serpens_34_hs_if_din",
-        "fifo_Y_pe_Serpens_35_hs_if_din",
-        "fifo_Y_pe_abd_Serpens_6_hs_if_din",
-        "fifo_Y_pe_abd_Serpens_7_hs_if_din",
-        "fifo_aXvec_Serpens_8_hs_if_din",
-    ]
-
-    parse_neg_paths(TEST_DIR, inter_slot_fifos, selected)
+#     parse_neg_paths(TEST_DIR, inter_slot_fifos, selected)

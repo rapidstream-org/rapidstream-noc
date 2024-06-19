@@ -22,17 +22,6 @@ def proc_tcl() -> list[str]:
     """
     return [
         """
-proc add_src_to_project { dir } {
-    set contents [glob -nocomplain -directory $dir *]
-    foreach item $contents {
-    if { [regexp {.*\\.tcl} $item] } {
-        source $item
-    } else {
-        add_files $item
-    }
-    }
-}
-
 proc concat_axi_pins { cell } {
     set pins [get_bd_intf_pins -of $cell]
     set result []
@@ -56,281 +45,6 @@ proc get_bd_rst_pins { cell } {
     return $result
 }
 
-"""
-    ]
-
-
-def mb_tcl(bd_name: str) -> list[str]:
-    """Generates Microblaze block diagram.
-
-    It creates simulation clock (300 MHz) and reset generators,
-    NoC with LPDDR (C0_DDR_CH1: 0x500_0000_0000:0x500_FFFF_FFFF),
-    and Vivado-generated Microblaze (64-bit with floating point support).
-
-    Returns a list of tcl commands.
-    """
-    tcl = [
-        f"""
-# Create block design
-create_bd_design "{bd_name}"
-update_compile_order -fileset sources_1
-"""
-    ]
-    return tcl + [
-        """
-# Hierarchical cell: microblaze_0_local_memory
-proc create_hier_cell_microblaze_0_local_memory { parentCell nameHier } {
-
-    variable script_folder
-
-    if { $parentCell eq "" || $nameHier eq "" } {
-    catch {
-        common::send_gid_msg -ssname BD::TCL -id 2092 -severity "ERROR" \
-        "create_hier_cell_microblaze_0_local_memory() - Empty argument(s)!"
-    }
-    return
-    }
-
-    # Get object for parentCell
-    set parentObj [get_bd_cells $parentCell]
-    if { $parentObj == "" } {
-    catch {
-        common::send_gid_msg -ssname BD::TCL -id 2090 -severity "ERROR" \
-        "Unable to find parent cell <$parentCell>!"
-    }
-    return
-    }
-
-    # Make sure parentObj is hier blk
-    set parentType [get_property TYPE $parentObj]
-    if { $parentType ne "hier" } {
-    catch {
-        common::send_gid_msg -ssname BD::TCL -id 2091 -severity "ERROR" \
-        "Parent <$parentObj> has TYPE = <$parentType>. Expected to be <hier>."
-    }
-    return
-    }
-
-    # Save current instance; Restore later
-    set oldCurInst [current_bd_instance .]
-
-    # Set parent object as current
-    current_bd_instance $parentObj
-
-    # Create cell and set as current instance
-    set hier_obj [create_bd_cell -type hier $nameHier]
-    current_bd_instance $hier_obj
-
-    # Create interface pins
-    create_bd_intf_pin -mode MirroredMaster -vlnv xilinx.com:interface:lmb_rtl:1.0 DLMB
-
-    create_bd_intf_pin -mode MirroredMaster -vlnv xilinx.com:interface:lmb_rtl:1.0 ILMB
-
-
-    # Create pins
-    create_bd_pin -dir I -type clk LMB_Clk
-    create_bd_pin -dir I -type rst SYS_Rst
-
-    # Create instance: dlmb_v10, and set properties
-    set dlmb_v10 [ create_bd_cell -type ip -vlnv xilinx.com:ip:lmb_v10:3.0 dlmb_v10 ]
-
-    # Create instance: ilmb_v10, and set properties
-    set ilmb_v10 [ create_bd_cell -type ip -vlnv xilinx.com:ip:lmb_v10:3.0 ilmb_v10 ]
-
-    # Create instance: dlmb_bram_if_cntlr, and set properties
-    set dlmb_bram_if_cntlr [ create_bd_cell -type ip \
-    -vlnv xilinx.com:ip:lmb_bram_if_cntlr:4.0 dlmb_bram_if_cntlr ]
-    set_property CONFIG.C_ECC {0} $dlmb_bram_if_cntlr
-
-
-    # Create instance: ilmb_bram_if_cntlr, and set properties
-    set ilmb_bram_if_cntlr [ create_bd_cell -type ip \
-    -vlnv xilinx.com:ip:lmb_bram_if_cntlr:4.0 ilmb_bram_if_cntlr ]
-    set_property CONFIG.C_ECC {0} $ilmb_bram_if_cntlr
-
-
-    # Create instance: lmb_bram, and set properties
-    set lmb_bram [ create_bd_cell -type ip -vlnv xilinx.com:ip:emb_mem_gen:1.0 lmb_bram ]
-    set_property -dict [list \
-    CONFIG.MEMORY_TYPE {True_Dual_Port_RAM} \
-    CONFIG.READ_LATENCY_A {1} \
-    CONFIG.READ_LATENCY_B {1} \
-    ] $lmb_bram
-
-    # Create interface connections
-    connect_bd_intf_net -intf_net microblaze_0_dlmb \
-    [get_bd_intf_pins dlmb_v10/LMB_M] [get_bd_intf_pins DLMB]
-    connect_bd_intf_net -intf_net microblaze_0_dlmb_bus \
-    [get_bd_intf_pins dlmb_v10/LMB_Sl_0] [get_bd_intf_pins dlmb_bram_if_cntlr/SLMB]
-    connect_bd_intf_net -intf_net microblaze_0_dlmb_cntlr \
-    [get_bd_intf_pins dlmb_bram_if_cntlr/BRAM_PORT] \
-    [get_bd_intf_pins lmb_bram/BRAM_PORTA]
-    connect_bd_intf_net -intf_net microblaze_0_ilmb \
-    [get_bd_intf_pins ilmb_v10/LMB_M] [get_bd_intf_pins ILMB]
-    connect_bd_intf_net -intf_net microblaze_0_ilmb_bus \
-    [get_bd_intf_pins ilmb_v10/LMB_Sl_0] [get_bd_intf_pins ilmb_bram_if_cntlr/SLMB]
-    connect_bd_intf_net -intf_net microblaze_0_ilmb_cntlr \
-    [get_bd_intf_pins ilmb_bram_if_cntlr/BRAM_PORT] \
-    [get_bd_intf_pins lmb_bram/BRAM_PORTB]
-
-    # Create port connections
-    connect_bd_net -net SYS_Rst_1 [get_bd_pins SYS_Rst] \
-    [get_bd_pins dlmb_v10/SYS_Rst] [get_bd_pins dlmb_bram_if_cntlr/LMB_Rst] \
-    [get_bd_pins ilmb_v10/SYS_Rst] [get_bd_pins ilmb_bram_if_cntlr/LMB_Rst]
-    connect_bd_net -net microblaze_0_Clk [get_bd_pins LMB_Clk] \
-    [get_bd_pins dlmb_v10/LMB_Clk] [get_bd_pins dlmb_bram_if_cntlr/LMB_Clk] \
-    [get_bd_pins ilmb_v10/LMB_Clk] [get_bd_pins ilmb_bram_if_cntlr/LMB_Clk]
-
-    # Restore current instance
-    current_bd_instance $oldCurInst
-}
-
-# ======================= Adding TB =======================
-startgroup
-set ch0_lpddr4_trip1 [ create_bd_intf_port -mode Master \
-    -vlnv xilinx.com:interface:lpddr4_rtl:1.0 ch0_lpddr4_trip1 ]
-set ch1_lpddr4_trip1 [ create_bd_intf_port -mode Master \
-    -vlnv xilinx.com:interface:lpddr4_rtl:1.0 ch1_lpddr4_trip1 ]
-
-set axi_noc_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 axi_noc_0 ]
-set_property -dict [list \
-    CONFIG.CH0_LPDDR4_0_BOARD_INTERFACE {ch0_lpddr4_trip1} \
-    CONFIG.CH1_LPDDR4_0_BOARD_INTERFACE {ch1_lpddr4_trip1} \
-    CONFIG.MC1_FLIPPED_PINOUT {true} \
-    CONFIG.MC_CHAN_REGION0 {DDR_CH1} \
-    CONFIG.MC_DM_WIDTH {4} \
-    CONFIG.MC_DQS_WIDTH {4} \
-    CONFIG.MC_DQ_WIDTH {32} \
-    CONFIG.MC_EN_INTR_RESP {TRUE} \
-    CONFIG.MC_SYSTEM_CLOCK {Differential} \
-    CONFIG.NUM_CLKS {1} \
-    CONFIG.NUM_MC {1} \
-    CONFIG.NUM_MCP {1} \
-    CONFIG.NUM_MI {0} \
-    CONFIG.NUM_SI {1} \
-    CONFIG.NUM_NSI {1} \
-    CONFIG.sys_clk0_BOARD_INTERFACE {lpddr4_clk1} \
-] $axi_noc_0
-
-set_property -dict [ list \
-    CONFIG.CONNECTIONS {MC_0 {read_bw {500} write_bw {500} \
-                            read_avg_burst {4} write_avg_burst {4}}} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {pl} \
-] [get_bd_intf_pins /axi_noc_0/S00_AXI]
-
-set_property -dict [list \
-    CONFIG.CONNECTIONS {MC_0 {read_bw {500} write_bw {500} \
-                            read_avg_burst {4} write_avg_burst {4}}} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {pl} \
-] [get_bd_intf_pins /axi_noc_0/S00_INI]
-
-set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {S00_AXI:S00_INI} \
-] [get_bd_pins /axi_noc_0/aclk0]
-
-# Create instance: rst_clk_wiz_100M, and set properties
-set rst_clk_wiz_100M [ create_bd_cell -type ip \
-    -vlnv xilinx.com:ip:proc_sys_reset:5.0 rst_clk_wiz_100M ]
-
-# Create instance: sim_clk_gen_0, and set properties
-set sim_clk_gen_0 [ create_bd_cell -type ip \
-    -vlnv xilinx.com:ip:sim_clk_gen:1.0 sim_clk_gen_0 ]
-set_property -dict [list \
-    CONFIG.CLOCK_TYPE {Differential} \
-    CONFIG.FREQ_HZ {200000000} \
-] $sim_clk_gen_0
-
-# Create instance: sim_clk_gen_1, and set properties
-set sim_clk_gen_1 [ create_bd_cell -type ip \
-    -vlnv xilinx.com:ip:sim_clk_gen:1.0 sim_clk_gen_1 ]
-set_property CONFIG.FREQ_HZ {300000000} $sim_clk_gen_1
-
-# Create instance: versal_cips_0, and set properties
-set versal_cips_0 [ create_bd_cell -type ip \
-    -vlnv xilinx.com:ip:versal_cips:3.4 versal_cips_0 ]
-
-# Create instance: microblaze_0, and set properties
-set microblaze_0 [ create_bd_cell -type ip \
-    -vlnv xilinx.com:ip:microblaze:11.0 microblaze_0 ]
-set_property -dict [list \
-    CONFIG.C_DEBUG_ENABLED {0} \
-    CONFIG.C_D_AXI {1} \
-    CONFIG.C_D_LMB {1} \
-    CONFIG.C_I_LMB {1} \
-    CONFIG.C_ADDR_SIZE 64 \
-    CONFIG.C_DATA_SIZE {64} \
-    CONFIG.C_LMB_DATA_SIZE {64} \
-    CONFIG.C_USE_FPU {1} \
-    CONFIG.C_USE_HW_MUL {2} \
-] $microblaze_0
-
-# Create instance: microblaze_0_local_memory
-create_hier_cell_microblaze_0_local_memory \
-    [current_bd_instance .] microblaze_0_local_memory
-
-# Create instance: smartconnect_0, and set properties
-set smartconnect_0 [ create_bd_cell -type ip \
-    -vlnv xilinx.com:ip:smartconnect:1.0 smartconnect_0 ]
-set_property -dict [list \
-    CONFIG.NUM_MI {2} \
-    CONFIG.NUM_SI {1} \
-] $smartconnect_0
-
-connect_bd_intf_net -intf_net axi_noc_0_CH0_LPDDR4_0 \
-    [get_bd_intf_ports ch0_lpddr4_trip1] [get_bd_intf_pins axi_noc_0/CH0_LPDDR4_0]
-connect_bd_intf_net -intf_net axi_noc_0_CH1_LPDDR4_0 \
-    [get_bd_intf_ports ch1_lpddr4_trip1] [get_bd_intf_pins axi_noc_0/CH1_LPDDR4_0]
-connect_bd_intf_net -intf_net microblaze_0_M_AXI_DP \
-    [get_bd_intf_pins smartconnect_0/S00_AXI] [get_bd_intf_pins microblaze_0/M_AXI_DP]
-connect_bd_intf_net -intf_net microblaze_0_dlmb_1 \
-    [get_bd_intf_pins microblaze_0/DLMB] \
-    [get_bd_intf_pins microblaze_0_local_memory/DLMB]
-connect_bd_intf_net -intf_net microblaze_0_ilmb_1 \
-    [get_bd_intf_pins microblaze_0/ILMB] \
-    [get_bd_intf_pins microblaze_0_local_memory/ILMB]
-connect_bd_intf_net -intf_net sim_clk_gen_0_diff_clk \
-    [get_bd_intf_pins sim_clk_gen_0/diff_clk] [get_bd_intf_pins axi_noc_0/sys_clk0]
-connect_bd_intf_net -intf_net smartconnect_0_M00_AXI \
-    [get_bd_intf_pins smartconnect_0/M00_AXI] [get_bd_intf_pins axi_noc_0/S00_AXI]
-
-# Create port connections
-connect_bd_net -net microblaze_0_Clk [get_bd_pins sim_clk_gen_1/clk] \
-    [get_bd_pins axi_noc_0/aclk0] [get_bd_pins rst_clk_wiz_100M/slowest_sync_clk] \
-    [get_bd_pins microblaze_0/Clk] [get_bd_pins microblaze_0_local_memory/LMB_Clk] \
-    [get_bd_pins smartconnect_0/aclk]
-connect_bd_net -net rst_clk_wiz_100M_bus_struct_reset \
-    [get_bd_pins rst_clk_wiz_100M/bus_struct_reset] \
-    [get_bd_pins microblaze_0_local_memory/SYS_Rst]
-connect_bd_net -net rst_clk_wiz_100M_mb_reset \
-    [get_bd_pins rst_clk_wiz_100M/mb_reset] [get_bd_pins microblaze_0/Reset]
-connect_bd_net -net sim_clk_gen_1_sync_rst [get_bd_pins sim_clk_gen_1/sync_rst] \
-    [get_bd_pins rst_clk_wiz_100M/ext_reset_in]
-endgroup
-"""
-    ]
-
-
-def assign_mb_bd_address() -> list[str]:
-    """Assigns the addresses of microblaze, DUT, and DDR.
-
-    Assigns 64K local instruction and data memory for microblaze starting at 0x0.
-    Auto-assigns the rest.
-
-    Returns a list of tcl commands.
-    """
-    return [
-        """
-assign_bd_address -offset 0x00000000 -range 0x00010000 -target_address_space \
-    [get_bd_addr_spaces microblaze_0/Data] \
-    [get_bd_addr_segs microblaze_0_local_memory/dlmb_bram_if_cntlr/SLMB/Mem] -force
-assign_bd_address -offset 0x00000000 -range 0x00010000 -target_address_space \
-    [get_bd_addr_spaces microblaze_0/Instruction] \
-    [get_bd_addr_segs microblaze_0_local_memory/ilmb_bram_if_cntlr/SLMB/Mem] -force
-
-# Auto-assign the rest
-assign_bd_address
 """
     ]
 
@@ -467,7 +181,7 @@ connect_bd_intf_net -intf_net noc_lpddr4_1_CH1_LPDDR4_1 \
     ]
 
 
-def arm_tcl(bd_name: str, frequency: str, hbm: bool) -> list[str]:
+def arm_tcl(bd_name: str, frequency: str, hbm: bool, fpd: bool) -> list[str]:
     """Generates the ARM block diagram for LPDDR.
 
     It creates the block diagram that matches the example Vitis platform shell.
@@ -579,7 +293,7 @@ CONFIG.PS_BOARD_INTERFACE {ps_pmc_fixed_io} \
 CONFIG.PS_PL_CONNECTIVITY_MODE {Custom} \
 CONFIG.PS_PMC_CONFIG { \
     CLOCK_MODE {Custom} \
-    DDR_MEMORY_MODE {Custom} \
+    DDR_MEMORY _MODE {Custom} \
     DESIGN_MODE {1} \
     DEVICE_INTEGRITY_MODE {Sysmon temperature voltage and external IO monitoring} \
     PMC_CRP_PL0_REF_CTRL_FREQMHZ {99.999992} \
@@ -648,6 +362,9 @@ CONFIG.PS_PMC_CONFIG { \
 ] $CIPS_0
 """
         ]
+
+    if not fpd:
+        tcl += ["set_property CONFIG.PS_PMC_CONFIG {PS_USE_M_AXI_FPD {0}} $CIPS_0"]
 
     if not hbm:
         tcl += [
@@ -773,8 +490,6 @@ connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_3 \
     [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_3] [get_bd_intf_pins cips_noc/S03_AXI]
 connect_bd_intf_net -intf_net CIPS_0_LPD_AXI_NOC_0 \
     [get_bd_intf_pins CIPS_0/LPD_AXI_NOC_0] [get_bd_intf_pins cips_noc/S06_AXI]
-connect_bd_intf_net -intf_net CIPS_0_M_AXI_GP0 \
-    [get_bd_intf_pins CIPS_0/M_AXI_FPD] [get_bd_intf_pins icn_ctrl/S00_AXI]
 connect_bd_intf_net -intf_net CIPS_0_PMC_NOC_AXI_0 \
     [get_bd_intf_pins CIPS_0/PMC_NOC_AXI_0] [get_bd_intf_pins cips_noc/S07_AXI]
 
@@ -847,7 +562,6 @@ connect_bd_net -net proc_sys_reset_0_peripheral_aresetn \
     [get_bd_pins icn_ctrl/aresetn] [get_bd_pins axi_intc_0/s_axi_aresetn]
 
 # with clk_wizard
-# connect_bd_net [get_bd_pins clk_wizard_0/clk_out1] [get_bd_pins CIPS_0/m_axi_fpd_aclk]
 # connect_bd_net \
 #     [get_bd_pins CIPS_0/pl0_ref_clk] [get_bd_pins clk_wizard_0/clk_in1]
 # connect_bd_net [get_bd_pins CIPS_0/pl0_resetn] \
@@ -859,7 +573,6 @@ connect_bd_net -net proc_sys_reset_0_peripheral_aresetn \
 #     [get_bd_pins clk_wizard_0/locked] [get_bd_pins proc_sys_reset_0/dcm_locked]
 
 # no clk_wizard
-connect_bd_net [get_bd_pins CIPS_0/pl0_ref_clk] [get_bd_pins CIPS_0/m_axi_fpd_aclk]
 connect_bd_net [get_bd_pins CIPS_0/pl0_resetn] \
     [get_bd_pins proc_sys_reset_0/ext_reset_in]
 connect_bd_net [get_bd_pins CIPS_0/pl0_ref_clk] \
@@ -867,10 +580,22 @@ connect_bd_net [get_bd_pins CIPS_0/pl0_ref_clk] \
     [get_bd_pins proc_sys_reset_0/slowest_sync_clk]
 """
     ]
+
+    if fpd:
+        tcl += [
+            """
+connect_bd_intf_net -intf_net CIPS_0_M_AXI_GP0 \
+    [get_bd_intf_pins CIPS_0/M_AXI_FPD] [get_bd_intf_pins icn_ctrl/S00_AXI]
+connect_bd_net [get_bd_pins CIPS_0/pl0_ref_clk] [get_bd_pins CIPS_0/m_axi_fpd_aclk]
+# if clk_wizard
+# connect_bd_net [get_bd_pins clk_wizard_0/clk_out1] [get_bd_pins CIPS_0/m_axi_fpd_aclk]
+"""
+        ]
+
     return tcl
 
 
-def arm_hbm_tcl(mmap_ports: dict[str, dict[str, int]]) -> list[str]:
+def arm_hbm_tcl(mmap_ports: dict[str, dict[str, int]], fpd: bool) -> list[str]:
     """Generates the HBM tcl for ARM.
 
     Returns a list of tcl commands.
@@ -884,9 +609,9 @@ def arm_hbm_tcl(mmap_ports: dict[str, dict[str, int]]) -> list[str]:
 set noc_hbm_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 noc_hbm_0 ]
 set_property -dict [list \
     CONFIG.HBM_NUM_CHNL {{{hbm_chnl}}} \
-    CONFIG.NUM_CLKS {{8}} \
+    CONFIG.NUM_CLKS {{9}} \
     CONFIG.NUM_HBM_BLI {{0}} \
-    CONFIG.NUM_MI {{0}} \
+    CONFIG.NUM_MI {{{0 if fpd else 1}}} \
     CONFIG.NUM_SI {{8}} \
     CONFIG.NUM_NSI {{0}} \
 ] $noc_hbm_0
@@ -910,15 +635,20 @@ set_property -dict [list \
                 CONFIG.CATEGORY {{{category}}} \
                 CONFIG.CONNECTIONS {{"
         ]
+        if not fpd and i in PS_RPU_PORT:
+            tcl += [
+                "\
+    M00_AXI {read_bw {50} write_bw {0} read_avg_burst {4} write_avg_burst {4}}"
+            ]
+
         arm_s_axi = f"S{i:02d}_AXI"
         for _, attr in mmap_ports.items():
             # only provide read access to the output ports
             if attr["write_bw"] > 0:
                 tcl += [
-                    f"""
+                    f"""\
     HBM{attr["bank"] // 2}_PORT{(attr["bank"] % 2) * 2} {{read_bw {{50}} write_bw {{0}}\
-    read_avg_burst {{4}} write_avg_burst {{4}}}} \
-"""
+    read_avg_burst {{4}} write_avg_burst {{4}}}}"""
                 ]
         tcl += [f"}}] [get_bd_intf_pins $noc_hbm_0/{arm_s_axi}]"]
 
@@ -926,7 +656,7 @@ set_property -dict [list \
         tcl += [
             f"""
 set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {{S{i:02d}_AXI}} \
+    CONFIG.ASSOCIATED_BUSIF {{{arm_s_axi}}} \
 ] [get_bd_pins $noc_hbm_0/aclk{i}]
 """
         ]
@@ -948,8 +678,6 @@ connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_3 \
     [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_3] [get_bd_intf_pins $noc_hbm_0/S03_AXI]
 connect_bd_intf_net -intf_net CIPS_0_LPD_AXI_NOC_0 \
     [get_bd_intf_pins CIPS_0/LPD_AXI_NOC_0] [get_bd_intf_pins $noc_hbm_0/S06_AXI]
-connect_bd_intf_net -intf_net CIPS_0_M_AXI_GP0 \
-    [get_bd_intf_pins CIPS_0/M_AXI_FPD] [get_bd_intf_pins icn_ctrl/S00_AXI]
 connect_bd_intf_net -intf_net CIPS_0_PMC_NOC_AXI_0 \
     [get_bd_intf_pins CIPS_0/PMC_NOC_AXI_0] [get_bd_intf_pins $noc_hbm_0/S07_AXI]
 
@@ -965,6 +693,22 @@ connect_bd_net [get_bd_pins CIPS_0/pmc_axi_noc_axi0_clk] \
     [get_bd_pins $noc_hbm_0/aclk7]
 """
     ]
+
+    if fpd:
+        tcl += [
+            """
+connect_bd_intf_net -intf_net CIPS_0_M_AXI_GP0 \
+    [get_bd_intf_pins CIPS_0/M_AXI_FPD] [get_bd_intf_pins icn_ctrl/S00_AXI]
+"""
+        ]
+    else:
+        tcl += [
+            """
+connect_bd_intf_net -intf_net CIPS_0_M_AXI_GP0 \
+    [get_bd_intf_pins /noc_hbm_0/M00_AXI] [get_bd_intf_pins icn_ctrl/S00_AXI]
+set_property CONFIG.ASSOCIATED_BUSIF M00_AXI [get_bd_pins /noc_hbm_0/aclk8]
+"""
+        ]
 
     return tcl
 

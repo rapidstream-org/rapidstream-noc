@@ -217,7 +217,6 @@ def parse_floorplan(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, list
         "inst/": parse_top_mod(ir)["submodules"],
     }
     if grouped_mod_ir := parse_mod(ir, grouped_mod_name):
-        print("No constraints from the grouped module.")
         # grouped module
         combined_mods[f"inst/{grouped_mod_name}_0/"] = grouped_mod_ir["submodules"]
 

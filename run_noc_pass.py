@@ -77,7 +77,8 @@ Please provide:
     FREQUENCY = 250.0
     IMPL_FREQUENCY = "300.0"
     HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
-    TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48.sv"
+    TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48_new.sv"
+    USE_M_AXI_FPD = False
 
     # intermediate dumps
     BD_NAME = "top_arm"
@@ -264,6 +265,7 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
             bd_attr=bd_attr,
             mmap_ports=mmap_port_ir,
             stream_attr=noc_stream_attr,
+            fpd=USE_M_AXI_FPD,
         )
         with open(f"{build_dir}/{VIVADO_BD_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
@@ -290,7 +292,7 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
             print("Number of modules:", sum(len(v) for v in floorplan.values()))
             print("Used slots: ", floorplan.keys())
 
-            tcl += export_constraint(floorplan, D)
+            tcl += export_constraint(floorplan, USE_M_AXI_FPD, D)
 
         with open(f"{build_dir}/{CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
