@@ -478,6 +478,10 @@ def arm_tcl(bd_name: str, frequency: str, hbm: bool) -> list[str]:
     tcl = [
         f"""
 # Create block design
+set top_bd_file [get_files {bd_name}.bd]
+if {{[llength $top_bd_file] > 0}} {{
+    remove_files $top_bd_file
+}}
 create_bd_design "{bd_name}"
 update_compile_order -fileset sources_1
 

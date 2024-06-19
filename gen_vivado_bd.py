@@ -217,8 +217,10 @@ connect_bd_intf_net [get_bd_intf_pins axis_dwidth_converter_to_noc_{i}/M_AXIS] \
 
 create_bd_cell -type ip -vlnv xilinx.com:ip:axis_dwidth_converter:1.1 \
     axis_dwidth_converter_to_dut_{i}
-set_property CONFIG.M_TDATA_NUM_BYTES {{{attr["width"]}}} \
-    [get_bd_cells axis_dwidth_converter_to_dut_{i}]
+set_property -dict [list \
+    CONFIG.S_TDATA_NUM_BYTES {{{roundup_num_bytes}}} \
+    CONFIG.M_TDATA_NUM_BYTES {{{attr["width"]}}} \
+] [get_bd_cells axis_dwidth_converter_to_dut_{i}]
 # connect_bd_net [get_bd_pins axis_dwidth_converter_to_dut_{i}/aclk] \
 #     [get_bd_pins clk_wizard_0/clk_out1]
 connect_bd_net [get_bd_pins axis_dwidth_converter_to_dut_{i}/aclk] \
@@ -477,46 +479,34 @@ def gen_arm_bd_hbm(
 
 
 if __name__ == "__main__":
-    # Unit test
+    import json
+
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/tmp"
+    I_ADD_PIPELINE_JSON = "add_pipeline.json"
+    I_MMAP_PORT_JSON = "mmap_port.json"
+    NOC_STREAM_ATTR_JSON = "noc_streams_attr.json"
+    VIVADO_BD_TCL = "arm_bd.tcl"
+    BD_NAME = "top_arm"
+    IMPL_FREQUENCY = "300.0"
+    HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
+    with open(f"{TEST_DIR}/{I_ADD_PIPELINE_JSON}", "r", encoding="utf-8") as file:
+        test_design = json.load(file)
+    top_mod_name = test_design["modules"]["top_name"]
+    with open(f"{TEST_DIR}/{I_MMAP_PORT_JSON}", "r", encoding="utf-8") as file:
+        test_mmap = json.load(file)
+    with open(f"{TEST_DIR}/{NOC_STREAM_ATTR_JSON}", "r", encoding="utf-8") as file:
+        test_stream_attr = json.load(file)
+
     arm_bd_tcl = gen_arm_bd_hbm(
         {
-            "bd_name": "top_arm",
-            "top_mod": "Serpens",
-            "hbm_init_file": "/home/jakeke/rapidstream-noc/serpens_hbm24_nasa4704.mem",
-            "frequency": "300.0",
+            "bd_name": BD_NAME,
+            "top_mod": top_mod_name,
+            "hbm_init_file": HBM_INIT_FILE,
+            "frequency": IMPL_FREQUENCY,
         },
-        {
-            "m_axi_edge_list_ch_0": {"bank": 0, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_1": {"bank": 1, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_2": {"bank": 2, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_3": {"bank": 3, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_4": {"bank": 4, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_5": {"bank": 5, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_6": {"bank": 6, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_7": {"bank": 7, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_8": {"bank": 8, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_9": {"bank": 9, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_10": {"bank": 10, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_11": {"bank": 11, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_12": {"bank": 12, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_13": {"bank": 13, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_14": {"bank": 14, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_15": {"bank": 15, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_16": {"bank": 16, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_17": {"bank": 17, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_18": {"bank": 18, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_19": {"bank": 19, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_20": {"bank": 20, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_21": {"bank": 21, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_22": {"bank": 22, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ch_23": {"bank": 23, "read_bw": 15000, "write_bw": 0},
-            "m_axi_edge_list_ptr": {"bank": 24, "read_bw": 15000, "write_bw": 0},
-            "m_axi_vec_X": {"bank": 25, "read_bw": 15000, "write_bw": 0},
-            "m_axi_vec_Y": {"bank": 26, "read_bw": 15000, "write_bw": 0},
-            "m_axi_vec_Y_out": {"bank": 27, "read_bw": 0, "write_bw": 14000},
-        },
-        {},
+        test_mmap,
+        test_stream_attr,
     )
 
-    with open("test/arm_bd.tcl", "w", encoding="utf-8") as file:
+    with open(f"{TEST_DIR}/{VIVADO_BD_TCL}", "w", encoding="utf-8") as file:
         file.write("\n".join(arm_bd_tcl))

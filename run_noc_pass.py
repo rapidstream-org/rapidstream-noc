@@ -82,11 +82,14 @@ Please provide:
     # intermediate dumps
     BD_NAME = "top_arm"
     GROUPED_MOD_NAME = "axis_noc_if"
+    I_ADD_PIPELINE_JSON = "add_pipeline.json"
+    I_MMAP_PORT_JSON = "mmap_port.json"
     SELECTED_STREAMS_JSON = "noc_streams.json"
     NOC_PASS_JSON = "noc_pass.json"
     NOC_PASS_WRAPPER_JSON = "noc_pass_wrapper.json"
     RTL_FOLDER = "rtl/"
     NOC_CONSTRAINT_TCL = "noc_constraint.tcl"
+    NOC_STREAMS_ATTR = "noc_streams_attr.json"
     CONSTRAINT_TCL = "constraint.tcl"
     VIVADO_BD_TCL = "arm_bd.tcl"
     VIVADO_PRJ_TCL = "run.tcl"
@@ -127,7 +130,8 @@ Please provide:
         else:
             zsh_cmds = f"""
 mkdir {build_dir}
-cp {rapidstream_json} {build_dir}/
+cp {rapidstream_json} {build_dir}/{I_ADD_PIPELINE_JSON}
+cp {mmap_port_json} {build_dir}/{I_MMAP_PORT_JSON}
 """
             print(zsh_cmds)
             subprocess.run(["zsh", "-c", zsh_cmds], check=True)
@@ -253,6 +257,8 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
                 "bandwidth": attr["bandwidth"],
                 "width": attr["width"],
             }
+        with open(f"{build_dir}/{NOC_STREAMS_ATTR}", "w", encoding="utf-8") as file:
+            json.dump(noc_stream_attr, file, indent=4)
 
         tcl = gen_arm_bd_hbm(
             bd_attr=bd_attr,
