@@ -193,9 +193,7 @@ close_project
     return tcl
 
 
-def export_constraint(
-    floorplan: dict[str, list[str]], fpd: bool, device: Device
-) -> list[str]:
+def export_constraint(floorplan: dict[str, list[str]], device: Device) -> list[str]:
     """Generates tcl constraints given the floorplan dictionary.
 
     Returns a list of tcl commands.
@@ -209,29 +207,6 @@ set_property PACKAGE_PIN BR53 [get_ports pl0_resetn_0]
 set_property IOSTANDARD LVDCI_15 [get_ports pl0_resetn_0]
 """
     ]
-
-    # constraint for control_s_axi's NSU
-    # find the control_s_axi slot region
-    def find_key_with_substring(floorplan: dict[str, list[str]], substring: str) -> str:
-        for slot, mods in floorplan.items():
-            if any(substring in e for e in mods):
-                return slot
-        raise NotImplementedError
-
-    if not fpd:
-        control_slot = find_key_with_substring(floorplan, "control_s_axi")
-        slot_nsu_nodes = concat_slot_nodes(control_slot, "nsu", " ", device)
-        tcl += [
-            f"""
-set control_nsu_pblock [get_pblocks {control_slot}_nsu]
-if {{[llength $control_nsu_pblock] == 0}} {{
-    create_pblock {control_slot}_nsu
-    resize_pblock {control_slot}_nsu -add {{{slot_nsu_nodes}}}
-}}
-add_cells_to_pblock {control_slot}_nsu \
-[get_cells */noc_hbm_0/inst/M00_AXI_nsu/*top_INST/NOC_NSU512_INST]
-"""
-        ]
 
     for slot in floorplan.keys():
         slot1, slot2 = slot.split("_TO_")
@@ -251,15 +226,37 @@ resize_pblock {slot} -add {cr}
         for m in mods:
             tcl += [f"    top_arm_i/dut_0/{m}"]
         tcl += ["}]"]
+    return tcl
 
-    tcl += [
-        """
-foreach pblock [get_pblocks] {
-  report_utilization -pblocks $pblock
-}
+
+def export_control_s_axi_constraint(
+    floorplan: dict[str, list[str]], device: Device
+) -> list[str]:
+    """Generates tcl constraints for the control_s_axi NSU.
+
+    Returns a list of tcl commands.
+    """
+
+    # find the control_s_axi slot region
+    def find_key_with_substring(floorplan: dict[str, list[str]], substring: str) -> str:
+        for slot, mods in floorplan.items():
+            if any(substring in e for e in mods):
+                return slot
+        raise NotImplementedError
+
+    control_slot = find_key_with_substring(floorplan, "control_s_axi")
+    slot_nsu_nodes = concat_slot_nodes(control_slot, "nsu", " ", device)
+    return [
+        f"""
+set control_nsu_pblock [get_pblocks {control_slot}_nsu]
+if {{[llength $control_nsu_pblock] == 0}} {{
+    create_pblock {control_slot}_nsu
+    resize_pblock {control_slot}_nsu -add {{{slot_nsu_nodes}}}
+}}
+add_cells_to_pblock {control_slot}_nsu \
+[get_cells */noc_hbm_0/inst/M00_AXI_nsu/*top_INST/NOC_NSU512_INST]
 """
     ]
-    return tcl
 
 
 def dump_neg_paths_summary(build_dir: str) -> list[str]:
@@ -377,8 +374,9 @@ if __name__ == "__main__":
     test_streams_slots, _ = parse_inter_slot(parse_top_mod(test_design))
     test_floorplan = parse_floorplan(noc_pass_wrapper_ir, GROUPED_MOD_NAME)
 
-    test_tcl = export_noc_constraint(test_streams_slots, test_noc_streams, D)
-    test_tcl += export_constraint(test_floorplan, USE_M_AXI_FPD, D)
+    test_tcl = export_constraint(test_floorplan, D)
+    test_tcl += export_noc_constraint(test_streams_slots, test_noc_streams, D)
+    test_tcl += export_control_s_axi_constraint(test_floorplan, D)
     with open(f"{TEST_DIR}/{CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
         file.write("\n".join(test_tcl))
 

@@ -21,6 +21,7 @@ from tcl_helper import (
     dump_neg_paths_summary,
     dump_streams_loc_tcl,
     export_constraint,
+    export_control_s_axi_constraint,
     export_noc_constraint,
     gen_vivado_prj_tcl,
     parse_neg_paths,
@@ -286,13 +287,16 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
             print("Number of modules:", sum(len(v) for v in floorplan.values()))
             print("Used slots: ", floorplan.keys())
 
-            tcl = export_constraint(floorplan, USE_M_AXI_FPD, D)
+            tcl = export_constraint(floorplan, D)
 
             tcl += export_noc_constraint(
                 streams_slots | cc_ret_noc_stream,
                 noc_streams + list(cc_ret_noc_stream.keys()),
                 D,
             )
+
+            if not USE_M_AXI_FPD:
+                tcl += export_control_s_axi_constraint(floorplan, D)
 
         with open(f"{build_dir}/{CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))

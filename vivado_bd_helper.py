@@ -638,7 +638,7 @@ set_property -dict [list \
         if not fpd and i in PS_RPU_PORT:
             tcl += [
                 "\
-    M00_AXI {read_bw {50} write_bw {0} read_avg_burst {4} write_avg_burst {4}}"
+    M00_AXI {read_bw {50} write_bw {50} read_avg_burst {4} write_avg_burst {4}}"
             ]
 
         arm_s_axi = f"S{i:02d}_AXI"
