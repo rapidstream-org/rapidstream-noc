@@ -108,10 +108,10 @@ resize_pblock {slot}_nsu -add {{{slot_nsu_nodes}}}
     for port_num, s in enumerate(noc_streams):
         tcl += [
             f"""\
-add_cells_to_pblock {streams_slots[s]["src"]}_nsu [get_cells */axis_noc_dut/inst/\
-M{str(port_num).zfill(2)}_AXIS_nsu/*top_INST/NOC_NSU512_INST]
-add_cells_to_pblock {streams_slots[s]["dest"]}_nmu [get_cells */axis_noc_dut/inst/\
-S{str(port_num).zfill(2)}_AXIS_nmu/*top_INST/NOC_NMU512_INST]"""
+add_cells_to_pblock {streams_slots[s]["src"]}_nmu [get_cells */axis_noc_dut/inst/\
+S{str(port_num).zfill(2)}_AXIS_nmu/*top_INST/NOC_NMU512_INST]
+add_cells_to_pblock {streams_slots[s]["dest"]}_nsu [get_cells */axis_noc_dut/inst/\
+M{str(port_num).zfill(2)}_AXIS_nsu/*top_INST/NOC_NSU512_INST]"""
         ]
     return tcl
 
@@ -343,7 +343,7 @@ if __name__ == "__main__":
     from ir_helper import parse_floorplan, parse_inter_slot, parse_top_mod
     from vh1582_nocgraph import vh1582_nocgraph
 
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/tmp"
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/build_a48_grb2"
     USE_M_AXI_FPD = False
     I_ADD_PIPELINE_JSON = "add_pipeline.json"
     SELECTED_STREAMS_JSON = "noc_streams.json"
