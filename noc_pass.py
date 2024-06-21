@@ -14,7 +14,12 @@ from pulp import GUROBI_CMD, LpMinimize, LpProblem, LpVariable, lpSum
 from pydantic import BaseModel, ConfigDict
 
 from device import Device
-from ir_helper import extract_slot_coord, extract_slot_range, get_slot_to_noc_nodes
+from ir_helper import (
+    extract_slot_coord,
+    extract_slot_range,
+    get_slot_to_noc_nodes,
+    round_up_to_noc_bw,
+)
 from tcl_helper import print_noc_loc_tcl
 
 
@@ -69,7 +74,8 @@ def print_ordered_edges(edges: list[tuple[str, str]]) -> None:
         print(" -> ".join(ordered_nodes))
         return
     except nx.NetworkXUnfeasible:
-        # Graph contains a cycle or is invalid
+        print("Graph contains a cycle or is invalid!")
+        print(edges)
         return
 
 
@@ -290,6 +296,20 @@ def ilp_noc_selector_add_constr(
                     == 0
                 )
 
+                # each node is visited at most once
+                m += lpSum(
+                    ilp_var[stream_name]["x"][(u, node)]
+                    for u in noc_nx_graph.predecessors(node)
+                ) + lpSum(
+                    ilp_var[stream_name]["x"][(node, v)]
+                    for v in noc_nx_graph.successors(node)
+                ) <= (
+                    1 + 1
+                )
+
+            # forbid disconnected edge cycles
+            # may not be necessary
+
         # src has only one outgoing flow
         for n in end_nodes["src"]:
             m += (
@@ -352,7 +372,7 @@ def ilp_noc_selector_add_constr(
         e_tuple = (e.src.name, e.dest.name)
         m += (
             lpSum(
-                bw * ilp_var[stream_name]["x"][e_tuple]
+                round_up_to_noc_bw(bw) * ilp_var[stream_name]["x"][e_tuple]
                 for stream_name, bw in streams_bw.items()
             )
             <= e.bandwidth
@@ -416,21 +436,20 @@ def ilp_noc_selector_add_constr_special(
 def ilp_noc_selector_add_obj(
     m: LpProblem,
     ilp_var: dict[str, dict[str, LpVariable]],
-    streams_nodes: dict[str, dict[str, list[str]]],
     streams_bw: dict[str, float],
-    device: Device,
 ) -> None:
     """Adds objectives for the NoC selector ILP."""
-    total_path_length = lpSum(
-        ilp_var[stream_name]["x"][e]
-        for stream_name, _ in streams_nodes.items()
-        for e in device.noc_graph.get_all_edges()
-    )
+    # not used
+    # total_path_length = lpSum(
+    #     ilp_var[stream_name]["x"][e]
+    #     for stream_name, _ in streams_nodes.items()
+    #     for e in device.noc_graph.get_all_edges()
+    # )
     total_not_mapped_bandwidth = lpSum(
         bw * ilp_var[stream_name]["not_mapped_stream"]
         for stream_name, bw in streams_bw.items()
     )
-    m += total_path_length + total_not_mapped_bandwidth
+    m += total_not_mapped_bandwidth
 
 
 def post_process_noc_ilp(
@@ -516,7 +535,7 @@ def ilp_noc_selector(
     streams_manhattan_bw = get_stream_manhattan_bw(streams_slots, streams_bw)
     # mypy bug: sees LpVariable as Any
     # declaring a new function and trick mypy to see ilp_var's values as LpVariable
-    ilp_noc_selector_add_obj(m, ilp_var, streams_nodes, streams_manhattan_bw, device)
+    ilp_noc_selector_add_obj(m, ilp_var, streams_manhattan_bw)
 
     m.solve(GUROBI_CMD(options=[("TimeLimit", 300)]))
 
