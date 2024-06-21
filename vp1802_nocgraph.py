@@ -279,7 +279,7 @@ def create_nps_slr0_edges(G: NocGraph, num_col: int) -> list[Edge]:
         # row 1 <-> row 3
         for row in range(2):
             edges += create_bidir_edges(
-                G.nps_slr0_nodes[x][row * 2 + row],
+                G.nps_slr0_nodes[x][row + 2],
                 G.nps_slr0_nodes[x][row],
                 bandwidth=16000,
             )

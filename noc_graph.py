@@ -68,6 +68,7 @@ class NocGraph(BaseModel):
     def add_edges(self, edges: list[Edge]) -> None:
         """Add a list of edges."""
         for e in edges:
+            assert e.src != e.dest, f"Invalid edge! {e.src.name} -> {e.dest.name}"
             self.add_edge(e)
 
     def get_all_nodes(self) -> list[str]:
