@@ -23,6 +23,7 @@ RapidStream Contributor License Agreement.
 """
 
 
+from ir_helper import VALID_TDATA_NUM_BYTES, round_up_to_noc_tdata
 from vivado_bd_helper import (
     arm_ddr_tcl,
     arm_hbm_tcl,
@@ -182,19 +183,14 @@ set_property CONFIG.ASSOCIATED_BUSIF [concat_axi_pins $axis_noc_dut] \
         tcl += [
             f"""
 set_property -dict [list CONFIG.CONNECTIONS {{{noc_m_port} \
-    {{ write_bw {{{attr["bandwidth"]}}} write_avg_burst {{4}}}}}}] \
+    {{ write_bw {{{float(attr["bandwidth"]) - 50}}} write_avg_burst {{4}}}}}}] \
 [get_bd_intf_pins /axis_noc_dut/{noc_s_port}]
 """
         ]
 
-        # AXIS-NoC only support TDATA_NUM_BYTES of 16, 32, 64
-        valid_tdata_num_bytes = [16, 32, 64]
         # rounds the width up to the nearest supported TDATA_NUM_BYTES
-        if int(attr["width"]) not in valid_tdata_num_bytes:
-            for b in sorted(valid_tdata_num_bytes):
-                if int(attr["width"]) < b:
-                    roundup_num_bytes = b
-                    break
+        if ((int(attr["width"]) + 7) // 8) not in VALID_TDATA_NUM_BYTES:
+            roundup_num_bytes = round_up_to_noc_tdata(attr["width"], True)
 
             tcl += [
                 f"""
@@ -217,7 +213,7 @@ create_bd_cell -type ip -vlnv xilinx.com:ip:axis_dwidth_converter:1.1 \
     axis_dwidth_converter_to_dut_{i}
 set_property -dict [list \
     CONFIG.S_TDATA_NUM_BYTES {{{roundup_num_bytes}}} \
-    CONFIG.M_TDATA_NUM_BYTES {{{attr["width"]}}} \
+    CONFIG.M_TDATA_NUM_BYTES {{{(int(attr["width"]) + 7) // 8}}} \
 ] [get_bd_cells axis_dwidth_converter_to_dut_{i}]
 # connect_bd_net [get_bd_pins axis_dwidth_converter_to_dut_{i}/aclk] \
 #     [get_bd_pins clk_wizard_0/clk_out1]

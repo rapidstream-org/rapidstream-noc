@@ -638,7 +638,7 @@ set_property -dict [list \
         if not fpd and i in PS_RPU_PORT:
             tcl += [
                 "\
-    M00_AXI {read_bw {50} write_bw {50} read_avg_burst {4} write_avg_burst {4}}"
+    M00_AXI {read_bw {0} write_bw {50} read_avg_burst {4} write_avg_burst {4}}"
             ]
 
         arm_s_axi = f"S{i:02d}_AXI"
@@ -647,7 +647,7 @@ set_property -dict [list \
             if attr["write_bw"] > 0:
                 tcl += [
                     f"""\
-    HBM{attr["bank"] // 2}_PORT{(attr["bank"] % 2) * 2} {{read_bw {{50}} write_bw {{0}}\
+    HBM{attr["bank"] // 2}_PORT{(attr["bank"] % 2) * 2} {{read_bw {{5}} write_bw {{0}}\
     read_avg_burst {{4}} write_avg_burst {{4}}}}"""
                 ]
         tcl += [f"}}] [get_bd_intf_pins $noc_hbm_0/{arm_s_axi}]"]

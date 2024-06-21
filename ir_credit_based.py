@@ -10,6 +10,7 @@ import math
 from typing import Any
 
 from ir_helper import (
+    FREQUENCY,
     CreditReturnEnum,
     IREnum,
     create_id_expr,
@@ -453,8 +454,8 @@ def credit_ret_over_noc(
         cc_ret_noc_stream[f"{merged_name}{IREnum.CC_RET.value}"] = {
             "src": srcdest[0],
             "dest": srcdest[1],
-            "width": str(cc_ret_width // 8),
-            "bandwidth": str(cc_ret_width * 250 / 8),
+            "width": str(cc_ret_width),
+            "bandwidth": str(cc_ret_width * FREQUENCY / 8),
         }
 
     for m in grouped_mod_ir["submodules"]:

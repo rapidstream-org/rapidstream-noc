@@ -46,6 +46,35 @@ class CreditReturnEnum(Enum):
     NOC = auto()
 
 
+# AXIS-NoC only support TDATA_NUM_BYTES of 16, 32, 64
+VALID_TDATA_NUM_BYTES = [16, 32, 64]
+FREQUENCY = 250.0
+
+
+def round_up_to_noc_tdata(width: str, byte: bool) -> str:
+    """Rounds the width up to the nearest supported NoC TDATA_NUM_BYTES.
+
+    Returns a string.
+    """
+    # round up to byte
+    if (width_b := (int(width) + 7) // 8) in VALID_TDATA_NUM_BYTES:
+        return str(width_b) if byte else width
+    for b in sorted(VALID_TDATA_NUM_BYTES):
+        if width_b < b:
+            return str(b) if byte else str(b * 8)
+    assert width_b <= VALID_TDATA_NUM_BYTES[-1], f"width ({width}) is too large."
+    raise NotImplementedError
+
+
+def round_up_to_noc_bw(raw_bw: float) -> float:
+    """Rounds the bandwidth up to the nearest supported NoC TDATA_NUM_BYTES.
+
+    Returns a float.
+    """
+    width_b = int(raw_bw / FREQUENCY) * 8
+    return int(round_up_to_noc_tdata(str(width_b), True)) * FREQUENCY
+
+
 def extract_slot_coord(slot_name: str) -> tuple[int, int]:
     """Extracts the x and y coordinates from the slot name.
 

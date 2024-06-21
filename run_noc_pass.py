@@ -14,7 +14,13 @@ from enum import Enum, auto
 
 from device import Device
 from gen_vivado_bd import gen_arm_bd_hbm
-from ir_helper import parse_floorplan, parse_inter_slot, parse_top_mod
+from ir_helper import (
+    FREQUENCY,
+    parse_floorplan,
+    parse_inter_slot,
+    parse_top_mod,
+    round_up_to_noc_tdata,
+)
 from noc_pass import greedy_selector, ilp_noc_selector, random_selector
 from noc_rtl_wrapper import noc_rtl_wrapper
 from tcl_helper import (
@@ -75,7 +81,6 @@ Please provide:
         top_mod_name = sys.argv[6]
 
     # currently hard-coded parameters
-    FREQUENCY = 250.0
     IMPL_FREQUENCY = "300.0"
     HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
     TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48_new.sv"
@@ -250,7 +255,7 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
             noc_stream_attr[f"m_axis_{s}"] = {
                 "dest": f"s_axis_{s}",
                 "bandwidth": str(streams_bw[s]),
-                "width": str((streams_widths[s] + 7) // 8),  # round up to bytes
+                "width": round_up_to_noc_tdata(str(streams_widths[s]), False),
             }
 
         for s, attr in cc_ret_noc_stream.items():

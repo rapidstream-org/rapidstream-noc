@@ -19,6 +19,7 @@ from ir_helper import (
     parse_fifo_params,
     parse_mod,
     parse_top_mod,
+    round_up_to_noc_tdata,
     set_all_pipeline_regions,
 )
 from ir_verilog import create_const_one_driver
@@ -47,11 +48,13 @@ def noc_rtl_wrapper(
 
         # create AXIS-NoC ports
         m_axis_ports = create_m_axis_ports(
-            fifo["name"], fifo_params[IREnum.DATA_WIDTH.value]
+            fifo["name"],
+            round_up_to_noc_tdata(fifo_params[IREnum.DATA_WIDTH.value], False),
         )
         axis_noc_ports += list(m_axis_ports.values())
         s_axis_ports = create_s_axis_ports(
-            fifo["name"], fifo_params[IREnum.DATA_WIDTH.value]
+            fifo["name"],
+            round_up_to_noc_tdata(fifo_params[IREnum.DATA_WIDTH.value], False),
         )
         axis_noc_ports += list(s_axis_ports.values())
 
@@ -161,7 +164,7 @@ if __name__ == "__main__":
     import json
     import subprocess
 
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/build_a48_grb"
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/build_a48_grb2"
     NOC_PASS_JSON = "noc_pass.json"
     NOC_PASS_WRAPPER_JSON = "noc_pass_wrapper.json"
     with open(f"{TEST_DIR}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:
