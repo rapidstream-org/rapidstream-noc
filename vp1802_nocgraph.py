@@ -342,10 +342,14 @@ def vp1802_nocgraph() -> NocGraph:
         nsu_nodes=nodes["nsu_nodes"],
         nps_vnoc_nodes=nodes["nps_vnoc_nodes"],
         nps_hnoc_nodes=nodes["nps_hnoc_nodes"],
-        nps_hbm_nodes=[],
-        ncrb_hbm_nodes=[],
         nps_slr0_nodes=nodes["nps_slr0_nodes"],
         ncrb_nodes=nodes["ncrb_nodes"],
+        nps_hbm_nodes=[],
+        ncrb_hbm_nodes=[],
+        hbm_mc_nodes=[],
+        nmu_hbm_nodes=[],
+        nps4_hbm_mc_nodes=[],
+        nps6_hbm_mc_nodes=[],
         edges=[],
     )
 

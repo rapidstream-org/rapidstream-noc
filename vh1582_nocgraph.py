@@ -19,6 +19,10 @@ def vh1582_nodes(
 
     Returns a dictionary of all node types in the NocGraph.
     """
+
+    def create_nodes(node_type: str, x: int, y_range: int) -> list[Node]:
+        return [Node(name=f"{node_type}_x{x}y{y}") for y in range(y_range)]
+
     num_row = sum(rows_per_slr)
     # each slr has two top and two bottom rows
     # except for bot slr which only has two top rows
@@ -34,55 +38,47 @@ def vh1582_nodes(
         "ncrb_nodes": [],
         "nps_hbm_nodes": [],
         "ncrb_hbm_nodes": [],
+        "hbm_mc_nodes": [],
+        "nmu_hbm_nodes": [],
+        "nps4_hbm_mc_nodes": [],
+        "nps6_hbm_mc_nodes": [],
     }
 
-    # create nmu and nsu nodes
     for x in range(num_col):
-        nmu_nodes_col = []
-        nsu_nodes_col = []
-        for y in range(num_row):
-            nmu_nodes_col.append(Node(name=f"nmu_x{x}y{y}"))
-            nsu_nodes_col.append(Node(name=f"nsu_x{x}y{y}"))
-        all_nodes["nmu_nodes"].append(nmu_nodes_col)
-        all_nodes["nsu_nodes"].append(nsu_nodes_col)
-
-        # create nps_vnoc nodes
-        col = []
-        for y in range(num_row * 2):
-            col.append(Node(name=f"nps_vnoc_x{x}y{y}"))
-        all_nodes["nps_vnoc_nodes"].append(col)
-
-        # create interconnect nps nodes
-        col = []
-        for y in range(num_inter_rows):
-            col.append(Node(name=f"nps_hnoc_x{x}y{y}"))
-        all_nodes["nps_hnoc_nodes"].append(col)
-
+        # create nmu and nsu nodes
+        all_nodes["nmu_nodes"].append(create_nodes("nmu", x, num_row))
+        all_nodes["nsu_nodes"].append(create_nodes("nsu", x, num_row))
+        # create nps vnoc nodes
+        all_nodes["nps_vnoc_nodes"].append(create_nodes("nps_vnoc", x, num_row * 2))
+        # create nps hnoc nodes
+        all_nodes["nps_hnoc_nodes"].append(create_nodes("nps_hnoc", x, num_inter_rows))
         # create nps HBM nodes
-        col = []
-        for y in range(4):
-            col.append(Node(name=f"nps_hbm_x{x}y{y}"))
-        all_nodes["nps_hbm_nodes"].append(col)
-
+        all_nodes["nps_hbm_nodes"].append(create_nodes("nps_hbm", x, 4))
         # create ncrb HBM nodes
-        col = []
-        for y in range(2):
-            col.append(Node(name=f"ncrb_hbm_x{x}y{y}"))
-        all_nodes["ncrb_hbm_nodes"].append(col)
-
+        all_nodes["ncrb_hbm_nodes"].append(create_nodes("ncrb_hbm", x, 2))
         # create bottom SLR0 nps nodes
-        col = []
-        for y in range(4):
-            col.append(Node(name=f"nps_slr0_x{x}y{y}"))
-        all_nodes["nps_slr0_nodes"].append(col)
+        all_nodes["nps_slr0_nodes"].append(create_nodes("nps_slr0", x, 4))
 
     # create ncrb nodes for connecting interconnect rows within each slr
     # NoC Clock Re-convergent Buffer (NCRB)
     for x in range(num_col - 1):
-        col = []
-        for y in range(num_inter_rows):
-            col.append(Node(name=f"ncrb_x{x}y{y}"))
-        all_nodes["ncrb_nodes"].append(col)
+        all_nodes["ncrb_nodes"].append(create_nodes("ncrb", x, num_inter_rows))
+
+    # create HBM Memory Controller (MC) nodes
+    for x in range(16):
+        all_nodes["hbm_mc_nodes"].append(
+            [
+                [Node(name=f"hbm_mc_x{x}y0_pc{pc}_port{p}") for p in range(2)]
+                for pc in range(2)
+            ]
+        )
+        # each MC has two Port Controllers (PC). Each PC supports two ports
+        for xx in range(4):
+            all_nodes["nmu_hbm_nodes"].append(Node(name=f"nmu_hbm_x{x*4+xx}y0"))
+        all_nodes["nps4_hbm_mc_nodes"].append(Node(name=f"nps4_hbm_mc_x{x}y0"))
+
+    for x in range(8):
+        all_nodes["nps6_hbm_mc_nodes"].append(create_nodes("nps6_hbm_mc", x, 4))
 
     return all_nodes
 
@@ -318,15 +314,6 @@ def create_nps_hbm_edges(G: NocGraph, num_col: int, num_row: int) -> list[Edge]:
             bandwidth=16000,
         )
 
-    # connect each row of HBM nps nodes horizontally
-    for x in range(num_col - 1):
-        for row in range(4):
-            edges += create_bidir_edges(
-                G.nps_hbm_nodes[x][row],
-                G.nps_hbm_nodes[x + 1][row],
-                bandwidth=16000,
-            )
-
     return edges
 
 
@@ -368,6 +355,97 @@ def create_nps_slr0_edges(G: NocGraph, num_col: int) -> list[Edge]:
     return edges
 
 
+def create_hbm_mc_edges(G: NocGraph, num_col: int) -> list[Edge]:
+    """Creates edges for hbm_mc_nodes.
+
+    Returns a list of edges.
+    """
+    edges = []
+
+    # HBM MC nodes <-> HBM MC nps4 nodes
+    for x in range(8):
+        for pc in range(2):
+            for p in range(2):
+                # pc0/pc1 port0 <-> left nps4
+                edges += create_bidir_edges(
+                    G.hbm_mc_nodes[x * 2][pc][p],
+                    G.nps4_hbm_mc_nodes[x * 2 + p],
+                    bandwidth=16000,
+                )
+                # pc0/pc1 port1 <-> right nps4
+                edges += create_bidir_edges(
+                    G.hbm_mc_nodes[x * 2 + 1][pc][p],
+                    G.nps4_hbm_mc_nodes[x * 2 + p],
+                    bandwidth=16000,
+                )
+                # print(G.hbm_mc_nodes[x*2][pc][p].name, G.nps4_hbm_mc_nodes[x*2+p].name)
+                # print(G.hbm_mc_nodes[x*2+1][pc][p].name, G.nps4_hbm_mc_nodes[x*2+p].name)
+
+    # NMU HBM nodes <-> HBM MC nps6 nodes
+    for x in range(8):
+        # NMU x0/1 <-> nps6 y0
+        # NMU x2/3 <-> nps6 y1
+        # NMU x4/5 <-> nps6 y2
+        # NMU x6/7 <-> nps6 y3
+        for y in range(4):
+            for xx in range(2):
+                edges += create_bidir_edges(
+                    G.nmu_hbm_nodes[x * 8 + y * 2 + xx],
+                    G.nps6_hbm_mc_nodes[x][y],
+                    bandwidth=16000,
+                )
+                # print(G.nmu_hbm_nodes[x*8+y*2+xx].name, G.nps6_hbm_mc_nodes[x][y].name)
+
+    # HBM MC nps6 nodes <-> HBM MC nps4 nodes
+    for x in range(8):
+        # each nps6 has connections to two nps4
+        for y in range(4):
+            for xx in range(2):
+                edges += create_bidir_edges(
+                    G.nps6_hbm_mc_nodes[x][y],
+                    G.nps4_hbm_mc_nodes[x * 2 + xx],
+                    bandwidth=16000,
+                )
+                # print(G.nps6_hbm_mc_nodes[x][y].name, G.nps4_hbm_mc_nodes[x*2+xx].name)
+
+    # connect each row of HBM nps nodes and HBM MC nps6 nodes horizontally
+    # first column of HBM MC nps6 nodes <-> first column of HBM nps nodes
+    # last column of HBM nps nodes <-> last column of HBM MC nps6 nodes
+    for row in range(4):
+        edges += create_bidir_edges(
+            G.nps6_hbm_mc_nodes[0][row],
+            G.nps_hbm_nodes[0][row],
+            bandwidth=16000,
+        )
+        edges += create_bidir_edges(
+            G.nps_hbm_nodes[3][row],
+            G.nps6_hbm_mc_nodes[7][row],
+            bandwidth=16000,
+        )
+
+    # HBM nps nodes <-> two HBM MC nps6 nodes <-> next HBM nps nodes
+    for x in range(num_col - 1):
+        for row in range(4):
+            # starting from HBM MC nps6 x = 1
+            edges += create_bidir_edges(
+                G.nps_hbm_nodes[x][row],
+                G.nps6_hbm_mc_nodes[x * 2 + 1][row],
+                bandwidth=16000,
+            )
+            edges += create_bidir_edges(
+                G.nps6_hbm_mc_nodes[x * 2 + 1][row],
+                G.nps6_hbm_mc_nodes[x * 2 + 2][row],
+                bandwidth=16000,
+            )
+            edges += create_bidir_edges(
+                G.nps6_hbm_mc_nodes[x * 2 + 2][row],
+                G.nps_hbm_nodes[x + 1][row],
+                bandwidth=16000,
+            )
+
+    return edges
+
+
 def vh1582_edges(
     G: NocGraph, num_slr: int, num_col: int, rows_per_slr: list[int]
 ) -> list[Edge]:
@@ -383,6 +461,7 @@ def vh1582_edges(
     edges += create_ncrb_edges(G, num_slr, num_col)
     edges += create_nps_hbm_edges(G, num_col, sum(rows_per_slr))
     edges += create_nps_slr0_edges(G, num_col)
+    edges += create_hbm_mc_edges(G, num_col)
     return edges
 
 
@@ -416,10 +495,14 @@ def vh1582_nocgraph() -> NocGraph:
         nsu_nodes=nodes["nsu_nodes"],
         nps_vnoc_nodes=nodes["nps_vnoc_nodes"],
         nps_hnoc_nodes=nodes["nps_hnoc_nodes"],
-        nps_hbm_nodes=nodes["nps_hbm_nodes"],
-        ncrb_hbm_nodes=nodes["ncrb_hbm_nodes"],
         nps_slr0_nodes=nodes["nps_slr0_nodes"],
         ncrb_nodes=nodes["ncrb_nodes"],
+        nps_hbm_nodes=nodes["nps_hbm_nodes"],
+        ncrb_hbm_nodes=nodes["ncrb_hbm_nodes"],
+        hbm_mc_nodes=nodes["hbm_mc_nodes"],
+        nmu_hbm_nodes=nodes["nmu_hbm_nodes"],
+        nps4_hbm_mc_nodes=nodes["nps4_hbm_mc_nodes"],
+        nps6_hbm_mc_nodes=nodes["nps6_hbm_mc_nodes"],
         edges=[],
     )
 

@@ -50,10 +50,14 @@ class NocGraph(BaseModel):
     nsu_nodes: list[list[Node]]
     nps_vnoc_nodes: list[list[Node]]
     nps_hnoc_nodes: list[list[Node]]
-    nps_hbm_nodes: list[list[Node]]
-    ncrb_hbm_nodes: list[list[Node]]
     nps_slr0_nodes: list[list[Node]]
     ncrb_nodes: list[list[Node]]
+    nps_hbm_nodes: list[list[Node]]
+    ncrb_hbm_nodes: list[list[Node]]
+    hbm_mc_nodes: list[list[list[Node]]]
+    nmu_hbm_nodes: list[Node]
+    nps4_hbm_mc_nodes: list[Node]
+    nps6_hbm_mc_nodes: list[list[Node]]
     edges: list[Edge]
 
     def __init__(self, **data: Any) -> None:
@@ -83,6 +87,12 @@ class NocGraph(BaseModel):
         all_nodes += [n.name for row in self.nps_hnoc_nodes for n in row]
         all_nodes += [n.name for row in self.nps_slr0_nodes for n in row]
         all_nodes += [n.name for row in self.ncrb_nodes for n in row]
+        all_nodes += [n.name for row in self.nps_hbm_nodes for n in row]
+        all_nodes += [n.name for row in self.ncrb_hbm_nodes for n in row]
+        all_nodes += [p.name for row in self.hbm_mc_nodes for n in row for p in n]
+        all_nodes += [row.name for row in self.nmu_hbm_nodes]
+        all_nodes += [row.name for row in self.nps4_hbm_mc_nodes]
+        all_nodes += [n.name for row in self.nps6_hbm_mc_nodes for n in row]
         return all_nodes
 
     def get_all_nmu_nodes(self) -> list[str]:
