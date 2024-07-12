@@ -49,13 +49,148 @@ proc get_bd_rst_pins { cell } {
     ]
 
 
-def arm_ddr_tcl() -> list[str]:
+def arm_ddr_tcl(fpd: bool) -> list[str]:
     """Generates the DDR NoC for ARM.
 
     Returns a list of tcl commands.
     """
-    return [
+    tcl = [
         """
+# Create instance: cips_noc, and set properties
+set cips_noc [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 cips_noc ]
+set_property -dict [list \
+    CONFIG.NUM_CLKS {9} \
+    CONFIG.NUM_MI {0} \
+    CONFIG.NUM_NMI {2} \
+    CONFIG.NUM_NSI {0} \
+    CONFIG.NUM_SI {8} \
+] $cips_noc
+
+set_property -dict [ list \
+    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
+                        M01_INI { read_bw {128} write_bw {128}} } \
+    CONFIG.DEST_IDS {} \
+    CONFIG.NOC_PARAMS {} \
+    CONFIG.CATEGORY {ps_cci} \
+] [get_bd_intf_pins /cips_noc/S00_AXI]
+
+set_property -dict [ list \
+    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
+                        M01_INI { read_bw {128} write_bw {128}} } \
+    CONFIG.DEST_IDS {} \
+    CONFIG.NOC_PARAMS {} \
+    CONFIG.CATEGORY {ps_cci} \
+] [get_bd_intf_pins /cips_noc/S01_AXI]
+
+set_property -dict [ list \
+    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
+                        M01_INI { read_bw {128} write_bw {128}} } \
+    CONFIG.DEST_IDS {} \
+    CONFIG.NOC_PARAMS {} \
+    CONFIG.CATEGORY {ps_cci} \
+] [get_bd_intf_pins /cips_noc/S02_AXI]
+
+set_property -dict [ list \
+    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
+                        M01_INI { read_bw {128} write_bw {128}} } \
+    CONFIG.DEST_IDS {} \
+    CONFIG.NOC_PARAMS {} \
+    CONFIG.CATEGORY {ps_cci} \
+] [get_bd_intf_pins /cips_noc/S03_AXI]
+
+set_property -dict [ list \
+    CONFIG.CONNECTIONS {M00_INI { read_bw {1} write_bw {0}} \
+                        M01_INI { read_bw {1} write_bw {0}} } \
+    CONFIG.DEST_IDS {} \
+    CONFIG.NOC_PARAMS {} \
+    CONFIG.CATEGORY {ps_nci} \
+] [get_bd_intf_pins /cips_noc/S04_AXI]
+
+set_property -dict [ list \
+    CONFIG.CONNECTIONS {M00_INI { read_bw {1} write_bw {0}} \
+                        M01_INI { read_bw {1} write_bw {0}} } \
+    CONFIG.DEST_IDS {} \
+    CONFIG.NOC_PARAMS {} \
+    CONFIG.CATEGORY {ps_nci} \
+] [get_bd_intf_pins /cips_noc/S05_AXI]
+
+set_property -dict [ list \
+    CONFIG.CONNECTIONS {M00_INI { read_bw {1} write_bw {0}} \
+                        M01_INI { read_bw {1} write_bw {0}} } \
+    CONFIG.DEST_IDS {} \
+    CONFIG.NOC_PARAMS {} \
+    CONFIG.CATEGORY {ps_rpu} \
+] [get_bd_intf_pins /cips_noc/S06_AXI]
+
+set_property -dict [ list \
+    CONFIG.CONNECTIONS {M00_INI { read_bw {1} write_bw {0}} \
+                        M01_INI { read_bw {1} write_bw {0}} } \
+    CONFIG.DEST_IDS {} \
+    CONFIG.NOC_PARAMS {} \
+    CONFIG.CATEGORY {ps_pmc} \
+] [get_bd_intf_pins /cips_noc/S07_AXI]
+
+set_property -dict [ list \
+    CONFIG.ASSOCIATED_BUSIF {S00_AXI} \
+] [get_bd_pins /cips_noc/aclk0]
+
+set_property -dict [ list \
+    CONFIG.ASSOCIATED_BUSIF {S01_AXI} \
+] [get_bd_pins /cips_noc/aclk1]
+
+set_property -dict [ list \
+    CONFIG.ASSOCIATED_BUSIF {S02_AXI} \
+] [get_bd_pins /cips_noc/aclk2]
+
+set_property -dict [ list \
+    CONFIG.ASSOCIATED_BUSIF {S03_AXI} \
+] [get_bd_pins /cips_noc/aclk3]
+
+set_property -dict [ list \
+    CONFIG.ASSOCIATED_BUSIF {S04_AXI} \
+] [get_bd_pins /cips_noc/aclk4]
+
+set_property -dict [ list \
+    CONFIG.ASSOCIATED_BUSIF {S05_AXI} \
+] [get_bd_pins /cips_noc/aclk5]
+
+set_property -dict [ list \
+    CONFIG.ASSOCIATED_BUSIF {S06_AXI} \
+] [get_bd_pins /cips_noc/aclk6]
+
+set_property -dict [ list \
+    CONFIG.ASSOCIATED_BUSIF {S07_AXI} \
+] [get_bd_pins /cips_noc/aclk7]
+
+# Create interface connections
+connect_bd_intf_net -intf_net CIPS_0_FPD_AXI_NOC_0 \
+    [get_bd_intf_pins CIPS_0/FPD_AXI_NOC_0] [get_bd_intf_pins cips_noc/S04_AXI]
+connect_bd_intf_net -intf_net CIPS_0_FPD_AXI_NOC_1 \
+    [get_bd_intf_pins CIPS_0/FPD_AXI_NOC_1] [get_bd_intf_pins cips_noc/S05_AXI]
+connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_0 \
+    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_0] [get_bd_intf_pins cips_noc/S00_AXI]
+connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_1 \
+    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_1] [get_bd_intf_pins cips_noc/S01_AXI]
+connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_2 \
+    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_2] [get_bd_intf_pins cips_noc/S02_AXI]
+connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_3 \
+    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_3] [get_bd_intf_pins cips_noc/S03_AXI]
+connect_bd_intf_net -intf_net CIPS_0_LPD_AXI_NOC_0 \
+    [get_bd_intf_pins CIPS_0/LPD_AXI_NOC_0] [get_bd_intf_pins cips_noc/S06_AXI]
+connect_bd_intf_net -intf_net CIPS_0_PMC_NOC_AXI_0 \
+    [get_bd_intf_pins CIPS_0/PMC_NOC_AXI_0] [get_bd_intf_pins cips_noc/S07_AXI]
+
+# Create port connections
+connect_bd_net [get_bd_pins CIPS_0/fpd_axi_noc_axi0_clk] [get_bd_pins cips_noc/aclk4]
+connect_bd_net [get_bd_pins CIPS_0/fpd_axi_noc_axi1_clk] [get_bd_pins cips_noc/aclk5]
+connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi0_clk] [get_bd_pins cips_noc/aclk0]
+connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi1_clk] [get_bd_pins cips_noc/aclk1]
+connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi2_clk] [get_bd_pins cips_noc/aclk2]
+connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi3_clk] [get_bd_pins cips_noc/aclk3]
+connect_bd_net [get_bd_pins CIPS_0/lpd_axi_noc_clk] [get_bd_pins cips_noc/aclk6]
+connect_bd_net [get_bd_pins CIPS_0/pmc_axi_noc_axi0_clk] \
+    [get_bd_pins cips_noc/aclk7]
+
 # Create interface ports
 set ch0_lpddr4_trip1 [ create_bd_intf_port -mode Master \
     -vlnv xilinx.com:interface:lpddr4_rtl:1.0 ch0_lpddr4_trip1 ]
@@ -96,14 +231,6 @@ set_property -dict [ list \
     CONFIG.FREQ_HZ {200321000} \
 ] $lpddr4_clk3
 
-# add one more NMI
-set_property -dict [list \
-    CONFIG.NUM_CLKS {9} \
-    CONFIG.NUM_MI {0} \
-    CONFIG.NUM_NMI {2} \
-    CONFIG.NUM_NSI {0} \
-    CONFIG.NUM_SI {8} \
-] $cips_noc
 
 # Create instance: noc_lpddr4_0, and set properties
 set noc_lpddr4_0 [ create_bd_cell -type ip \
@@ -114,6 +241,7 @@ set_property -dict [list \
     CONFIG.MC_CHANNEL_INTERLEAVING {true} \
     CONFIG.MC_CHAN_REGION1 {DDR_LOW1} \
     CONFIG.MC_CH_INTERLEAVING_SIZE {4K_Bytes} \
+    CONFIG.NUM_MCP {4} \
     CONFIG.NUM_CLKS {0} \
     CONFIG.NUM_MCP {1} \
     CONFIG.NUM_MI {0} \
@@ -136,6 +264,7 @@ set_property -dict [list \
     CONFIG.CH1_LPDDR4_0_BOARD_INTERFACE {ch1_lpddr4_trip2} \
     CONFIG.CH1_LPDDR4_1_BOARD_INTERFACE {ch1_lpddr4_trip3} \
     CONFIG.MC_CHAN_REGION0 {DDR_CH1} \
+    CONFIG.NUM_MCP {4} \
     CONFIG.NUM_CLKS {0} \
     CONFIG.NUM_MI {0} \
     CONFIG.NUM_NSI {2} \
@@ -180,6 +309,28 @@ connect_bd_intf_net -intf_net noc_lpddr4_1_CH1_LPDDR4_1 \
 """
     ]
 
+    if not fpd:
+        tcl += [
+            """
+set_property -dict [list \
+    CONFIG.NUM_MI {1} \
+] $cips_noc
+
+set_property -dict [ list \
+    CONFIG.CONNECTIONS {M00_AXI { read_bw {0} write_bw {128}} } \
+    CONFIG.DEST_IDS {} \
+    CONFIG.NOC_PARAMS {} \
+    CONFIG.CATEGORY {ps_rpu} \
+] [get_bd_intf_pins /cips_noc/S06_AXI]
+
+connect_bd_intf_net -intf_net CIPS_0_M_AXI_GP0 \
+    [get_bd_intf_pins /cips_noc/M00_AXI] [get_bd_intf_pins icn_ctrl/S00_AXI]
+connect_bd_net [get_bd_pins CIPS_0/pl0_ref_clk] [get_bd_pins /cips_noc/aclk8]
+set_property CONFIG.ASSOCIATED_BUSIF M00_AXI [get_bd_pins /cips_noc/aclk8]
+"""
+        ]
+    return tcl
+
 
 def arm_tcl(bd_name: str, frequency: str, hbm: bool, fpd: bool) -> list[str]:
     """Generates the ARM block diagram for LPDDR.
@@ -211,7 +362,6 @@ set CIPS_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:versal_cips:3.4 CIPS_0 
 # Set CIPS properties
 set_property -dict [list \
 CONFIG.CLOCK_MODE {Custom} \
-CONFIG.CLOCK_MODE {Custom} \
 CONFIG.DDR_MEMORY_MODE {Custom} \
 CONFIG.PS_BOARD_INTERFACE {ps_pmc_fixed_io} \
 CONFIG.PS_PL_CONNECTIVITY_MODE {Custom} \
@@ -220,11 +370,7 @@ CONFIG.PS_PMC_CONFIG { \
     CLOCK_MODE {Custom} \
     DESIGN_MODE {1} \
     DEVICE_INTEGRITY_MODE {Sysmon temperature voltage and external IO monitoring} \
-"""
-        ]
-        tcl += [f"PMC_CRP_PL0_REF_CTRL_FREQMHZ {{{frequency}}}"]
-        tcl += [
-            """
+    PMC_CRP_PL0_REF_CTRL_FREQMHZ {99.999992} \
     PMC_GPIO0_MIO_PERIPHERAL {{ENABLE 1} {IO {PMC_MIO 0 .. 25}}} \
     PMC_GPIO1_MIO_PERIPHERAL {{ENABLE 1} {IO {PMC_MIO 26 .. 51}}} \
     PMC_MIO12 {{AUX_IO 0} {DIRECTION out} {DRIVE_STRENGTH 8mA} {OUTPUT_DATA default} \
@@ -293,7 +439,7 @@ CONFIG.PS_BOARD_INTERFACE {ps_pmc_fixed_io} \
 CONFIG.PS_PL_CONNECTIVITY_MODE {Custom} \
 CONFIG.PS_PMC_CONFIG { \
     CLOCK_MODE {Custom} \
-    DDR_MEMORY _MODE {Custom} \
+    DDR_MEMORY_MODE {Custom} \
     DESIGN_MODE {1} \
     DEVICE_INTEGRITY_MODE {Sysmon temperature voltage and external IO monitoring} \
     PMC_CRP_PL0_REF_CTRL_FREQMHZ {99.999992} \
@@ -308,10 +454,10 @@ CONFIG.PS_PMC_CONFIG { \
     PMC_REF_CLK_FREQMHZ {33.3333} \
     PMC_SD1 {{CD_ENABLE 1} {CD_IO {PMC_MIO 28}} {POW_ENABLE 1} {POW_IO {PMC_MIO 51}} \
         {RESET_ENABLE 0} {RESET_IO {PMC_MIO 12}} {WP_ENABLE 0} {WP_IO {PMC_MIO 1}}} \
-        PMC_SD1_PERIPHERAL {{CLK_100_SDR_OTAP_DLY 0x3} {CLK_200_SDR_OTAP_DLY 0x2} \
-        {CLK_50_DDR_ITAP_DLY 0x36} {CLK_50_DDR_OTAP_DLY 0x3} {CLK_50_SDR_ITAP_DLY 0x2C}\
+    PMC_SD1_PERIPHERAL {{CLK_100_SDR_OTAP_DLY 0x3} {CLK_200_SDR_OTAP_DLY 0x2} \
+        {CLK_50_DDR_ITAP_DLY 0x2A} {CLK_50_DDR_OTAP_DLY 0x3} {CLK_50_SDR_ITAP_DLY 0x25}\
         {CLK_50_SDR_OTAP_DLY 0x4} {ENABLE 1} {IO {PMC_MIO 26 .. 36}}} \
-    PMC_SD1_SLOT_TYPE {SD 3.0} \
+    PMC_SD1_SLOT_TYPE {SD 3.0 AUTODIR} \
     PMC_USE_PMC_NOC_AXI0 {1} \
     PS_BOARD_INTERFACE {ps_pmc_fixed_io} \
     PS_ENET0_MDIO {{ENABLE 1} {IO {PS_MIO 24 .. 25}}} \
@@ -358,153 +504,21 @@ CONFIG.PS_PMC_CONFIG { \
     SMON_INTERFACE_TO_USE {I2C} \
     SMON_PMBUS_ADDRESS {0x18} \
     SMON_TEMP_AVERAGING_SAMPLES {0} \
-} \
-] $CIPS_0
+}] $CIPS_0
 """
         ]
+
+    tcl += [
+        f"""
+set_property -dict [list \
+CONFIG.PS_PMC_CONFIG {{ \
+    PMC_CRP_PL0_REF_CTRL_FREQMHZ {{{frequency}}}
+}} ] $CIPS_0
+"""
+    ]
 
     if not fpd:
         tcl += ["set_property CONFIG.PS_PMC_CONFIG {PS_USE_M_AXI_FPD {0}} $CIPS_0"]
-
-    if not hbm:
-        tcl += [
-            """
-# Create instance: cips_noc, and set properties
-set cips_noc [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 cips_noc ]
-set_property -dict [list \
-    CONFIG.NUM_CLKS {8} \
-    CONFIG.NUM_MI {0} \
-    CONFIG.NUM_NMI {1} \
-    CONFIG.NUM_NSI {0} \
-    CONFIG.NUM_SI {8} \
-] $cips_noc
-
-set_property -dict [ list \
-    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
-                        M01_INI { read_bw {128} write_bw {128}} } \
-    CONFIG.DEST_IDS {} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {ps_cci} \
-] [get_bd_intf_pins /cips_noc/S00_AXI]
-
-set_property -dict [ list \
-    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
-                        M01_INI { read_bw {128} write_bw {128}} } \
-    CONFIG.DEST_IDS {} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {ps_cci} \
-] [get_bd_intf_pins /cips_noc/S01_AXI]
-
-set_property -dict [ list \
-    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
-                        M01_INI { read_bw {128} write_bw {128}} } \
-    CONFIG.DEST_IDS {} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {ps_cci} \
-] [get_bd_intf_pins /cips_noc/S02_AXI]
-
-set_property -dict [ list \
-    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
-                        M01_INI { read_bw {128} write_bw {128}} } \
-    CONFIG.DEST_IDS {} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {ps_cci} \
-] [get_bd_intf_pins /cips_noc/S03_AXI]
-
-set_property -dict [ list \
-    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
-                        M01_INI { read_bw {128} write_bw {128}} } \
-    CONFIG.DEST_IDS {} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {ps_nci} \
-] [get_bd_intf_pins /cips_noc/S04_AXI]
-
-set_property -dict [ list \
-    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
-                        M01_INI { read_bw {128} write_bw {128}} } \
-    CONFIG.DEST_IDS {} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {ps_nci} \
-] [get_bd_intf_pins /cips_noc/S05_AXI]
-
-set_property -dict [ list \
-    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
-                        M01_INI { read_bw {128} write_bw {128}} } \
-    CONFIG.DEST_IDS {} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {ps_rpu} \
-] [get_bd_intf_pins /cips_noc/S06_AXI]
-
-set_property -dict [ list \
-    CONFIG.CONNECTIONS {M00_INI { read_bw {128} write_bw {128}} \
-                        M01_INI { read_bw {128} write_bw {128}} } \
-    CONFIG.DEST_IDS {} \
-    CONFIG.NOC_PARAMS {} \
-    CONFIG.CATEGORY {ps_pmc} \
-] [get_bd_intf_pins /cips_noc/S07_AXI]
-
-set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {S00_AXI} \
-] [get_bd_pins /cips_noc/aclk0]
-
-set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {S01_AXI} \
-] [get_bd_pins /cips_noc/aclk1]
-
-set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {S02_AXI} \
-] [get_bd_pins /cips_noc/aclk2]
-
-set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {S03_AXI} \
-] [get_bd_pins /cips_noc/aclk3]
-
-set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {S04_AXI} \
-] [get_bd_pins /cips_noc/aclk4]
-
-set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {S05_AXI} \
-] [get_bd_pins /cips_noc/aclk5]
-
-set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {S06_AXI} \
-] [get_bd_pins /cips_noc/aclk6]
-
-set_property -dict [ list \
-    CONFIG.ASSOCIATED_BUSIF {S07_AXI} \
-] [get_bd_pins /cips_noc/aclk7]
-
-# Create interface connections
-connect_bd_intf_net -intf_net CIPS_0_FPD_AXI_NOC_0 \
-    [get_bd_intf_pins CIPS_0/FPD_AXI_NOC_0] [get_bd_intf_pins cips_noc/S04_AXI]
-connect_bd_intf_net -intf_net CIPS_0_FPD_AXI_NOC_1 \
-    [get_bd_intf_pins CIPS_0/FPD_AXI_NOC_1] [get_bd_intf_pins cips_noc/S05_AXI]
-connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_0 \
-    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_0] [get_bd_intf_pins cips_noc/S00_AXI]
-connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_1 \
-    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_1] [get_bd_intf_pins cips_noc/S01_AXI]
-connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_2 \
-    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_2] [get_bd_intf_pins cips_noc/S02_AXI]
-connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_3 \
-    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_3] [get_bd_intf_pins cips_noc/S03_AXI]
-connect_bd_intf_net -intf_net CIPS_0_LPD_AXI_NOC_0 \
-    [get_bd_intf_pins CIPS_0/LPD_AXI_NOC_0] [get_bd_intf_pins cips_noc/S06_AXI]
-connect_bd_intf_net -intf_net CIPS_0_PMC_NOC_AXI_0 \
-    [get_bd_intf_pins CIPS_0/PMC_NOC_AXI_0] [get_bd_intf_pins cips_noc/S07_AXI]
-
-# Create port connections
-connect_bd_net [get_bd_pins CIPS_0/fpd_axi_noc_axi0_clk] [get_bd_pins cips_noc/aclk4]
-connect_bd_net [get_bd_pins CIPS_0/fpd_axi_noc_axi1_clk] [get_bd_pins cips_noc/aclk5]
-connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi0_clk] [get_bd_pins cips_noc/aclk0]
-connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi1_clk] [get_bd_pins cips_noc/aclk1]
-connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi2_clk] [get_bd_pins cips_noc/aclk2]
-connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi3_clk] [get_bd_pins cips_noc/aclk3]
-connect_bd_net [get_bd_pins CIPS_0/lpd_axi_noc_clk] [get_bd_pins cips_noc/aclk6]
-connect_bd_net [get_bd_pins CIPS_0/pmc_axi_noc_axi0_clk] \
-    [get_bd_pins cips_noc/aclk7]
-"""
-        ]
 
     tcl += [
         """
@@ -638,7 +652,7 @@ set_property -dict [list \
         if not fpd and i in PS_RPU_PORT:
             tcl += [
                 "\
-    M00_AXI {read_bw {0} write_bw {50} read_avg_burst {4} write_avg_burst {4}}"
+    M00_AXI {read_bw {0} write_bw {5} read_avg_burst {4} write_avg_burst {4}}"
             ]
 
         arm_s_axi = f"S{i:02d}_AXI"
@@ -694,14 +708,7 @@ connect_bd_net [get_bd_pins CIPS_0/pmc_axi_noc_axi0_clk] \
 """
     ]
 
-    if fpd:
-        tcl += [
-            """
-connect_bd_intf_net -intf_net CIPS_0_M_AXI_GP0 \
-    [get_bd_intf_pins CIPS_0/M_AXI_FPD] [get_bd_intf_pins icn_ctrl/S00_AXI]
-"""
-        ]
-    else:
+    if not fpd:
         tcl += [
             """
 connect_bd_intf_net -intf_net CIPS_0_M_AXI_GP0 \

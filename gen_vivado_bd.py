@@ -393,13 +393,13 @@ def gen_arm_bd_ddr(
     tcl = []
     tcl += proc_tcl()
     tcl += arm_tcl(bd_attr["bd_name"], bd_attr["frequency"], False, fpd)
-    tcl += arm_ddr_tcl()
+    tcl += arm_ddr_tcl(fpd)
     tcl += dut_tcl(
         bd_attr["top_mod"],
         mmap_ports,
         stream_attr,
         False,
-        "",
+        bd_attr["hbm_init_file"],
     )
     tcl += connect_dut_arm_ddr_tcl(stream_attr)
     tcl += assign_arm_bd_address()
@@ -449,7 +449,8 @@ def gen_arm_bd_hbm(
 if __name__ == "__main__":
     import json
 
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/tmp"
+    TEST_DIR = "/home/jakeke/AutoSA/cnn_out/20x14/build/cnn20x14_none"
+    TOP_MOD_NAME = "kernel0"
     I_ADD_PIPELINE_JSON = "add_pipeline.json"
     I_MMAP_PORT_JSON = "mmap_port.json"
     NOC_STREAM_ATTR_JSON = "noc_streams_attr.json"
@@ -458,18 +459,15 @@ if __name__ == "__main__":
     USE_M_AXI_FPD = False
     IMPL_FREQUENCY = "300.0"
     HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
-    with open(f"{TEST_DIR}/{I_ADD_PIPELINE_JSON}", "r", encoding="utf-8") as file:
-        test_design = json.load(file)
-    top_mod_name = test_design["modules"]["top_name"]
     with open(f"{TEST_DIR}/{I_MMAP_PORT_JSON}", "r", encoding="utf-8") as file:
         test_mmap = json.load(file)
     with open(f"{TEST_DIR}/{NOC_STREAM_ATTR_JSON}", "r", encoding="utf-8") as file:
         test_stream_attr = json.load(file)
 
-    arm_bd_tcl = gen_arm_bd_hbm(
+    arm_bd_tcl = gen_arm_bd_ddr(
         {
             "bd_name": BD_NAME,
-            "top_mod": top_mod_name,
+            "top_mod": TOP_MOD_NAME,
             "hbm_init_file": HBM_INIT_FILE,
             "frequency": IMPL_FREQUENCY,
         },

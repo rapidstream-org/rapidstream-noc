@@ -36,16 +36,16 @@ class Device(BaseModel):
         assert (
             self.noc_graph.num_slr == self.slot_height
         ), "Assumes slot_height equals number of SLRs."
-        assert len(self.cr_mapping) <= self.slot_height
+        assert len(self.cr_mapping) <= self.slot_width
         if len(self.cr_mapping) > 0:
-            assert len(self.cr_mapping[0]) <= self.slot_width
+            assert len(self.cr_mapping[0]) <= self.slot_height
 
         # generate per slot data structure
         self.nmu_per_slot = [
-            [0 for _ in range(self.slot_width)] for _ in range(self.slot_height)
+            [0 for _ in range(self.slot_height)] for _ in range(self.slot_width)
         ]
         self.nsu_per_slot = [
-            [0 for _ in range(self.slot_width)] for _ in range(self.slot_height)
+            [0 for _ in range(self.slot_height)] for _ in range(self.slot_width)
         ]
         for j in range(self.slot_height):
             nodes_per_slr = self.noc_graph.rows_per_slr[j] * self.noc_graph.num_col
