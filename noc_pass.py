@@ -455,7 +455,7 @@ def ilp_noc_selector_add_obj(
 def post_process_noc_ilp(
     ilp_var: dict[str, dict[str, LpVariable | dict[Any, LpVariable]]],
     streams_nodes: dict[str, dict[str, list[str]]],
-) -> list[str]:
+) -> tuple[list[str], dict[str, tuple[str, str]]]:
     """Post-process the ILP ilp_var after solver.
 
     Parses the selected streams. Prints the selected NoC nodes and edges.
@@ -500,14 +500,14 @@ def post_process_noc_ilp(
     print_noc_loc_tcl(node_loc)
 
     print(f"ILP has selected {len(noc_streams)} streams")
-    return noc_streams
+    return noc_streams, node_loc
 
 
 def ilp_noc_selector(
     streams_slots: dict[str, dict[str, str]],
     streams_bw: dict[str, float],
     device: Device,
-) -> list[str]:
+) -> tuple[list[str], dict[str, tuple[str, str]]]:
     """Selects a subset of the streams to use NoC using ILP.
 
     Minimizes the total bandwidth not using NoC and the total path length.
@@ -518,7 +518,7 @@ def ilp_noc_selector(
         streams_bw:     dictionary of the cross-slot stream's bandwidth target
         device:         Device class with slot attributes and NoC graph.
 
-    Returns a list of selected streams to use NoC.
+    Returns a dict of selected streams to use NoC with their nodes.
     """
     m = LpProblem("noc", LpMinimize)
 

@@ -13,7 +13,7 @@ import sys
 from enum import Enum, auto
 
 from device import Device
-from gen_vivado_bd import gen_arm_bd_hbm
+from gen_vivado_bd import gen_arm_bd_ddr, gen_arm_bd_hbm
 from ir_helper import (
     FREQUENCY,
     parse_floorplan,
@@ -31,6 +31,7 @@ from tcl_helper import (
     export_noc_constraint,
     gen_vivado_prj_tcl,
     parse_neg_paths,
+    print_noc_loc_tcl,
 )
 from vh1582_nocgraph import vh1582_nocgraph
 from vp1802_nocgraph import vp1802_nocgraph
@@ -83,13 +84,15 @@ Please provide:
     # currently hard-coded parameters
     IMPL_FREQUENCY = "300.0"
     HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
-    TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48_new.sv"
+    TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48.sv"
+    # HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm56_nasa4704.mem"
+    # TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a56.sv"
     USE_M_AXI_FPD = False
+    MULTI_SITE_NOC = False
 
     # intermediate dumps
     BD_NAME = "top_arm"
     GROUPED_MOD_NAME = "axis_noc_if"
-    I_ADD_PIPELINE_JSON = "add_pipeline.json"
     I_MMAP_PORT_JSON = "mmap_port.json"
     SELECTED_STREAMS_JSON = "noc_streams.json"
     NOC_PASS_JSON = "noc_pass.json"
@@ -102,33 +105,63 @@ Please provide:
     VIVADO_PRJ_TCL = "run.tcl"
     DUMP_NEG_PATHS_TCL = "dump_neg_paths.tcl"
 
+    with open(mmap_port_json, "r", encoding="utf-8") as file:
+        mmap_port_ir = json.load(file)
+
     if device_name == DeviceEnum.VP1802.name:
         G = vp1802_nocgraph()
         PART_NUM = "xcvp1802-lsvc4072-2MP-e-S"
         BOARD_PART = "xilinx.com:vpk180:part0:1.2"
+
+        D = Device(
+            part_num=PART_NUM,
+            board_part=BOARD_PART,
+            slot_width=2,
+            slot_height=4,
+            noc_graph=G,
+            nmu_per_slot=[],  # generated
+            nsu_per_slot=[],  # generated
+            cr_mapping=[
+                [
+                    "CLOCKREGION_X0Y1:CLOCKREGION_X4Y4",
+                    "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7",
+                    "CLOCKREGION_X0Y8:CLOCKREGION_X4Y10",
+                    "CLOCKREGION_X0Y11:CLOCKREGION_X4Y13",
+                ],
+                [
+                    "CLOCKREGION_X5Y1:CLOCKREGION_X9Y4",
+                    "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7",
+                    "CLOCKREGION_X5Y8:CLOCKREGION_X9Y10",
+                    "CLOCKREGION_X5Y11:CLOCKREGION_X9Y13",
+                ],
+            ],
+        )
     elif device_name == DeviceEnum.VH1582.name:
         G = vh1582_nocgraph()
         PART_NUM = "xcvh1582-vsva3697-2MP-e-S"
         BOARD_PART = "xilinx.com:vhk158:part0:1.1"
+
+        D = Device(
+            part_num=PART_NUM,
+            board_part=BOARD_PART,
+            slot_width=2,
+            slot_height=2,
+            noc_graph=G,
+            nmu_per_slot=[],  # generated
+            nsu_per_slot=[],  # generated
+            cr_mapping=[
+                [
+                    "CLOCKREGION_X0Y1:CLOCKREGION_X4Y4",
+                    "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7",
+                ],
+                [
+                    "CLOCKREGION_X5Y1:CLOCKREGION_X9Y4",
+                    "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7",
+                ],
+            ],
+        )
     else:
         raise NotImplementedError
-
-    with open(mmap_port_json, "r", encoding="utf-8") as file:
-        mmap_port_ir = json.load(file)
-
-    D = Device(
-        part_num=PART_NUM,
-        board_part=BOARD_PART,
-        slot_width=2,
-        slot_height=2,
-        noc_graph=G,
-        nmu_per_slot=[],  # generated
-        nsu_per_slot=[],  # generated
-        cr_mapping=[
-            ["CLOCKREGION_X0Y1:CLOCKREGION_X4Y4", "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7"],
-            ["CLOCKREGION_X5Y1:CLOCKREGION_X9Y4", "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7"],
-        ],
-    )
 
     if build_dir != "":
         if os.path.exists(build_dir):
@@ -137,7 +170,7 @@ Please provide:
         else:
             zsh_cmds = f"""
 mkdir {build_dir}
-cp {rapidstream_json} {build_dir}/{I_ADD_PIPELINE_JSON}
+cp {rapidstream_json} {build_dir}/
 cp {mmap_port_json} {build_dir}/{I_MMAP_PORT_JSON}
 """
             print(zsh_cmds)
@@ -169,7 +202,7 @@ cp {mmap_port_json} {build_dir}/{I_MMAP_PORT_JSON}
         elif selector == SelectorEnum.GREEDY.name:
             noc_streams = greedy_selector(streams_slots, D)
         elif selector == SelectorEnum.GRB.name:
-            noc_streams = ilp_noc_selector(streams_slots, streams_bw, D)
+            noc_streams, node_loc = ilp_noc_selector(streams_slots, streams_bw, D)
         else:
             raise NotImplementedError
 
@@ -230,11 +263,17 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
 """
 
         # export noc constraints
-        tcl = dump_streams_loc_tcl(
-            streams_slots | cc_ret_noc_stream,
-            noc_streams + list(cc_ret_noc_stream.keys()),
-            D,
-        )
+        if MULTI_SITE_NOC:
+            # multi-site NoC constraints in IPI
+            tcl = dump_streams_loc_tcl(
+                streams_slots | cc_ret_noc_stream,
+                noc_streams + list(cc_ret_noc_stream.keys()),
+                D,
+            )
+        elif selector == SelectorEnum.GRB.name:
+            # single site NoC constraint found by ILP
+            tcl = print_noc_loc_tcl(node_loc)
+
         with open(f"{build_dir}/{NOC_CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
 
@@ -267,12 +306,22 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
         with open(f"{build_dir}/{NOC_STREAMS_ATTR}", "w", encoding="utf-8") as file:
             json.dump(noc_stream_attr, file, indent=4)
 
-        tcl = gen_arm_bd_hbm(
-            bd_attr=bd_attr,
-            mmap_ports=mmap_port_ir,
-            stream_attr=noc_stream_attr,
-            fpd=USE_M_AXI_FPD,
-        )
+        if device_name == DeviceEnum.VP1802.name:
+            tcl = gen_arm_bd_ddr(
+                bd_attr=bd_attr,
+                mmap_ports=mmap_port_ir,
+                stream_attr=noc_stream_attr,
+                fpd=USE_M_AXI_FPD,
+            )
+        elif device_name == DeviceEnum.VH1582.name:
+            tcl = gen_arm_bd_hbm(
+                bd_attr=bd_attr,
+                mmap_ports=mmap_port_ir,
+                stream_attr=noc_stream_attr,
+                fpd=USE_M_AXI_FPD,
+            )
+        else:
+            raise NotImplementedError
         with open(f"{build_dir}/{VIVADO_BD_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
 
@@ -294,11 +343,13 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
 
             tcl = export_constraint(floorplan, D)
 
-            tcl += export_noc_constraint(
-                streams_slots | cc_ret_noc_stream,
-                noc_streams + list(cc_ret_noc_stream.keys()),
-                D,
-            )
+            # needed for multi-site NoC constraints
+            if MULTI_SITE_NOC:
+                tcl += export_noc_constraint(
+                    streams_slots | cc_ret_noc_stream,
+                    noc_streams + list(cc_ret_noc_stream.keys()),
+                    D,
+                )
 
             if not USE_M_AXI_FPD:
                 tcl += export_control_s_axi_constraint(floorplan, D)
