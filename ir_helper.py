@@ -17,6 +17,7 @@ class IREnum(Enum):
 
     PIPELINE = "__rs_hs_pipeline"
     REGION = "REGION"
+    BODY = "BODY"
     HEAD_REGION = "__HEAD_REGION"
     TAIL_REGION = "__TAIL_REGION"
     DATA_WIDTH = "DATA_WIDTH"
@@ -45,6 +46,12 @@ class CreditReturnEnum(Enum):
     PIPELINE = auto()
     NOC = auto()
 
+
+PIPELINE_MAPPING = {
+    "__rs_ap_ctrl_start_ready_pipeline": "AP",
+    "__rs_ff_pipeline": "FF",
+    "__rs_hs_pipeline": "HS",
+}
 
 # AXIS-NoC only support TDATA_NUM_BYTES of 16, 32, 64
 VALID_TDATA_NUM_BYTES = [16, 32, 64]
@@ -253,34 +260,28 @@ def parse_floorplan(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, list
     for parent, mods in combined_mods.items():
         for sub_mod in mods:
             sub_mod_name = parent + sub_mod["name"]
-            if (slot := sub_mod["floorplan_region"]) is None:
-                # pipeline module, needs to extract slot of each reg
-                for p in sub_mod["parameters"]:
-                    # ignored clock and reset pipelining
-                    # __rs___rs_ap_ctrl_pipeline_aux_split_aux_0__inst
-                    # __rs___rs_ap_ctrl_pipeline_aux_split_aux_1__inst
-                    inst_name = ""
-                    if p["name"] == IREnum.HEAD_REGION.value:
-                        # head reg
-                        inst_name = sub_mod_name + "/head"
-                    elif p["name"] == IREnum.TAIL_REGION.value:
-                        # tail reg
-                        inst_name = sub_mod_name + "/tail"
-                    elif IREnum.REGION.value in p["name"]:
-                        # body reg
-                        body_num = p["name"].split("_")[3]
-                        inst_name = sub_mod_name + f"/body_{body_num}"
-
-                    if inst_name:
-                        slot = p["expr"][0]["repr"].strip('"')
-                        insts[inst_name] = slot
-            else:
+            if sub_mod["floorplan_region"] is not None:
                 # regular module
-                insts[sub_mod_name] = slot
+                insts[sub_mod_name] = sub_mod["floorplan_region"]
+            elif sub_mod["module"] in PIPELINE_MAPPING:
+                # pipeline module, needs to extract slot of each reg
+                mapped_name = PIPELINE_MAPPING[sub_mod["module"]]
+                body_level = find_repr(sub_mod["parameters"], IREnum.BODY_LEVEL.value)
+                insts[f"{sub_mod_name}/RS_{mapped_name}_PP_HEAD"] = find_repr(
+                    sub_mod["parameters"], IREnum.HEAD_REGION.value
+                ).strip('"')
+                insts[f"{sub_mod_name}/RS_{mapped_name}_PP_TAIL"] = find_repr(
+                    sub_mod["parameters"], IREnum.TAIL_REGION.value
+                ).strip('"')
+                for i in range(int(body_level)):
+                    insts[f"{sub_mod_name}/RS_{mapped_name}_PP_BODY_{i}"] = find_repr(
+                        sub_mod["parameters"], f"__BODY_{i}_REGION"
+                    ).strip('"')
 
     # convert {instance: slot} to {slot: [instances]}
     floorplan: dict[str, list[str]] = {}
     for sub_mod_name, slot in insts.items():
+        assert slot is not None, f"{sub_mod_name} cannot have null slot!"
         if slot not in floorplan:
             floorplan[slot] = []
         floorplan[slot].append(sub_mod_name)

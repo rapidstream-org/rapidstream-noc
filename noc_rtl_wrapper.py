@@ -10,6 +10,7 @@ import copy
 from typing import Any
 
 from ir_helper import (
+    PIPELINE_MAPPING,
     IREnum,
     create_m_axis_ports,
     create_module_inst_ir,
@@ -23,6 +24,21 @@ from ir_helper import (
     set_all_pipeline_regions,
 )
 from ir_verilog import create_const_one_driver
+
+
+def add_dont_touch(ir: dict[str, Any]) -> None:
+    """Adds dont_touch to the pipelining BODY registers.
+
+    Returns None.
+    """
+    for mod in ir["modules"]["module_definitions"]:
+        if mod["name"] in PIPELINE_MAPPING:
+            print(f"Add dont_touch to {mod['name']} BODY registers")
+            for m in mod["submodules"]:
+                if IREnum.BODY.value in m["name"]:
+                    module_name = m["module"]
+                    print(m["name"])
+                    m["module"] = '(* dont_touch = "true" *) ' + module_name
 
 
 def noc_rtl_wrapper(
@@ -156,6 +172,7 @@ def noc_rtl_wrapper(
     # cc_ret_noc_stream = add_credit_control(
     #     new_ir, grouped_mod_name, "12", "5", CreditReturnEnum.NOC
     # )
+    add_dont_touch(new_ir)
 
     return new_ir, cc_ret_noc_stream
 
@@ -164,7 +181,7 @@ if __name__ == "__main__":
     import json
     import subprocess
 
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/build_a48_grb2"
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/serpens48_grb5"
     NOC_PASS_JSON = "noc_pass.json"
     NOC_PASS_WRAPPER_JSON = "noc_pass_wrapper.json"
     with open(f"{TEST_DIR}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:

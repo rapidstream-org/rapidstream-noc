@@ -12,7 +12,7 @@ from device import Device
 from ir_helper import extract_slot_coord, get_slot_nodes
 
 
-def print_noc_loc_tcl(node_loc: dict[str, tuple[str, str]]) -> None:
+def print_noc_loc_tcl(node_loc: dict[str, tuple[str, str]]) -> list[str]:
     """Prints the NMU and NSU location constraints in tcl."""
     tcl = []
     for port_num, (nmu_loc, nsu_loc) in enumerate(node_loc.values()):
@@ -31,6 +31,7 @@ def print_noc_loc_tcl(node_loc: dict[str, tuple[str, str]]) -> None:
             "_AXIS]"
         ]
     print("\n".join(tcl))
+    return tcl
 
 
 def concat_slot_nodes(slot: str, node_type: str, sep: str, device: Device) -> str:
@@ -97,7 +98,7 @@ def export_noc_constraint(
         slot_nsu_nodes = concat_slot_nodes(slot, "nsu", " ", device)
         tcl += [
             f"""
-# begin defining a slot for logic resources
+# begin defining a slot for NoC resources
 create_pblock {slot}_nmu
 resize_pblock {slot}_nmu -add {{{slot_nmu_nodes}}}
 create_pblock {slot}_nsu
@@ -205,6 +206,9 @@ set_property PACKAGE_PIN BP53 [get_ports pl0_ref_clk_0]
 set_property IOSTANDARD LVDCI_15 [get_ports pl0_ref_clk_0]
 set_property PACKAGE_PIN BR53 [get_ports pl0_resetn_0]
 set_property IOSTANDARD LVDCI_15 [get_ports pl0_resetn_0]
+
+# Initialize an empty list to store undefined cells
+set undefined_cells {}
 """
     ]
 
@@ -222,10 +226,34 @@ resize_pblock {slot} -add {cr}
         ]
 
     for slot, mods in floorplan.items():
-        tcl += [f"add_cells_to_pblock [get_pblocks {slot}] [get_cells -regex {{"]
+        tcl += [f"set {slot}_cells {{"]
         for m in mods:
             tcl += [f"    top_arm_i/dut_0/{m}"]
-        tcl += ["}]"]
+        tcl += [
+            f"""}}
+add_cells_to_pblock [get_pblocks {slot}] [get_cells -regex ${slot}_cells]
+
+# Iterate through each cell in the list
+foreach cell ${slot}_cells {{
+    set defined [llength [get_cells $cell]]
+    if {{ $defined == 0 }} {{
+        lappend undefined_cells $cell
+    }}
+}}
+"""
+        ]
+
+    tcl += [
+        """
+if {[llength $undefined_cells] > 0} {
+    puts "Undefined cells:"
+    foreach cell $undefined_cells {
+        puts $cell
+    }
+}
+"""
+    ]
+
     return tcl
 
 
@@ -340,7 +368,7 @@ if __name__ == "__main__":
     from ir_helper import parse_floorplan, parse_inter_slot, parse_top_mod
     from vh1582_nocgraph import vh1582_nocgraph
 
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/build_a48_grb2"
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/tmp"
     USE_M_AXI_FPD = False
     I_ADD_PIPELINE_JSON = "add_pipeline.json"
     SELECTED_STREAMS_JSON = "noc_streams.json"

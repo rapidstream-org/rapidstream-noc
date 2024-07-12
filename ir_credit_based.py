@@ -167,17 +167,15 @@ def add_cc_slave_group(
         for fifo in submodules:
             if IREnum.NMU.value in fifo["name"]:
                 n = fifo["name"].replace(IREnum.NMU.value, "")
-                region = find_repr(fifo["parameters"], IREnum.HEAD_REGION.value).strip(
-                    '"'
-                )
+                region = find_repr(fifo["parameters"], IREnum.HEAD_REGION.value)
+                region = region.strip('"')
                 srcdest_by_fifo[n] = (region, region)
 
         for fifo in submodules:
             if IREnum.NSU.value in fifo["name"]:
                 n = fifo["name"].replace(IREnum.NSU.value, "")
-                region = find_repr(fifo["parameters"], IREnum.HEAD_REGION.value).strip(
-                    '"'
-                )
+                region = find_repr(fifo["parameters"], IREnum.HEAD_REGION.value)
+                region = region.strip('"')
                 srcdest_by_fifo[n] = (region,) + srcdest_by_fifo[n][1:]
 
         fifo_by_srcdest = {}
