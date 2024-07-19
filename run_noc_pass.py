@@ -6,6 +6,7 @@ All rights reserved. The contributor(s) of this file has/have agreed to the
 RapidStream Contributor License Agreement.
 """
 
+import copy
 import json
 import os
 import subprocess
@@ -22,7 +23,7 @@ from ir_helper import (
     round_up_to_noc_tdata,
 )
 from noc_pass import greedy_selector, ilp_noc_selector, random_selector
-from noc_rtl_wrapper import noc_rtl_wrapper
+from noc_rtl_wrapper import add_dont_touch, noc_rtl_wrapper
 from tcl_helper import (
     dump_neg_paths_summary,
     dump_streams_loc_tcl,
@@ -112,6 +113,20 @@ Please provide:
         G = vp1802_nocgraph()
         PART_NUM = "xcvp1802-lsvc4072-2MP-e-S"
         BOARD_PART = "xilinx.com:vpk180:part0:1.2"
+        cr_mapping = [
+            [
+                "CLOCKREGION_X0Y1:CLOCKREGION_X4Y4",
+                "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7",
+                "CLOCKREGION_X0Y8:CLOCKREGION_X4Y10",
+                "CLOCKREGION_X0Y11:CLOCKREGION_X4Y13",
+            ],
+            [
+                "CLOCKREGION_X5Y1:CLOCKREGION_X9Y4",
+                "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7",
+                "CLOCKREGION_X5Y8:CLOCKREGION_X9Y10",
+                "CLOCKREGION_X5Y11:CLOCKREGION_X9Y13",
+            ],
+        ]
 
         D = Device(
             part_num=PART_NUM,
@@ -121,25 +136,22 @@ Please provide:
             noc_graph=G,
             nmu_per_slot=[],  # generated
             nsu_per_slot=[],  # generated
-            cr_mapping=[
-                [
-                    "CLOCKREGION_X0Y1:CLOCKREGION_X4Y4",
-                    "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7",
-                    "CLOCKREGION_X0Y8:CLOCKREGION_X4Y10",
-                    "CLOCKREGION_X0Y11:CLOCKREGION_X4Y13",
-                ],
-                [
-                    "CLOCKREGION_X5Y1:CLOCKREGION_X9Y4",
-                    "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7",
-                    "CLOCKREGION_X5Y8:CLOCKREGION_X9Y10",
-                    "CLOCKREGION_X5Y11:CLOCKREGION_X9Y13",
-                ],
-            ],
+            cr_mapping=cr_mapping,
         )
     elif device_name == DeviceEnum.VH1582.name:
         G = vh1582_nocgraph()
         PART_NUM = "xcvh1582-vsva3697-2MP-e-S"
         BOARD_PART = "xilinx.com:vhk158:part0:1.1"
+        cr_mapping = [
+            [
+                "CLOCKREGION_X0Y1:CLOCKREGION_X4Y4",
+                "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7",
+            ],
+            [
+                "CLOCKREGION_X5Y1:CLOCKREGION_X9Y4",
+                "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7",
+            ],
+        ]
 
         D = Device(
             part_num=PART_NUM,
@@ -149,16 +161,7 @@ Please provide:
             noc_graph=G,
             nmu_per_slot=[],  # generated
             nsu_per_slot=[],  # generated
-            cr_mapping=[
-                [
-                    "CLOCKREGION_X0Y1:CLOCKREGION_X4Y4",
-                    "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7",
-                ],
-                [
-                    "CLOCKREGION_X5Y1:CLOCKREGION_X9Y4",
-                    "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7",
-                ],
-            ],
+            cr_mapping=cr_mapping,
         )
     else:
         raise NotImplementedError
@@ -176,7 +179,7 @@ cp {mmap_port_json} {build_dir}/{I_MMAP_PORT_JSON}
             print(zsh_cmds)
             subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
-    # Main algorithm: select streams for NoC
+    # Select streams for NoC
     if selector == SelectorEnum.NONE.name:
         streams_slots: dict[str, dict[str, str]] = {}
         noc_streams: list[str] = []
@@ -229,29 +232,32 @@ cp {mmap_port_json} {build_dir}/{I_MMAP_PORT_JSON}
 unzip {rapidstream_json} -d {build_dir}/tmp
 mv {build_dir}/tmp/ip_repo/*/src {build_dir}/rtl
 """
-        elif selector == SelectorEnum.EMPTY.name:
-            # skip generating grouped ir and wrapper
-            zsh_cmds = f"""
-rapidstream-exporter -i {rapidstream_json} -f {build_dir}/rtl
-"""
         else:
-            zsh_cmds = f"""
+            if selector == SelectorEnum.EMPTY.name:
+                # skip generating grouped ir and wrapper
+                # but add dont_touch to pipelining registers
+                noc_pass_wrapper_ir = copy.deepcopy(rapidstream_ir)
+                add_dont_touch(noc_pass_wrapper_ir)
+            else:
+                zsh_cmds = f"""
 source ~/.zshrc && amd
 rapidstream-optimizer -i {rapidstream_json} -o {build_dir}/{NOC_PASS_JSON} \
     create-group-wrapper --group-name-to-insts-json={build_dir}/{SELECTED_STREAMS_JSON}
 """
-            print(zsh_cmds)
-            subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+                print(zsh_cmds)
+                subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
-            # generate new rtl wrapper
-            with open(f"{build_dir}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:
-                noc_pass_ir = json.load(file)
+                # generate new rtl wrapper
+                with open(
+                    f"{build_dir}/{NOC_PASS_JSON}", "r", encoding="utf-8"
+                ) as file:
+                    noc_pass_ir = json.load(file)
 
-            noc_pass_wrapper_ir, cc_ret_noc_stream = noc_rtl_wrapper(
-                noc_pass_ir, GROUPED_MOD_NAME
-            )
-            for s, attr in cc_ret_noc_stream.items():
-                print(f'{s}\t {attr["width"]}\t {attr["bandwidth"]}')
+                noc_pass_wrapper_ir, cc_ret_noc_stream = noc_rtl_wrapper(
+                    noc_pass_ir, GROUPED_MOD_NAME
+                )
+                for s, attr in cc_ret_noc_stream.items():
+                    print(f'{s}\t {attr["width"]}\t {attr["bandwidth"]}')
 
             with open(
                 f"{build_dir}/{NOC_PASS_WRAPPER_JSON}", "w", encoding="utf-8"
@@ -262,9 +268,10 @@ rapidstream-optimizer -i {rapidstream_json} -o {build_dir}/{NOC_PASS_JSON} \
 rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
 """
 
-        # export noc constraints
+        # export noc IPI constraints
+        tcl = []
         if MULTI_SITE_NOC:
-            # multi-site NoC constraints in IPI
+            # multi-site NoC constraints
             tcl = dump_streams_loc_tcl(
                 streams_slots | cc_ret_noc_stream,
                 noc_streams + list(cc_ret_noc_stream.keys()),
@@ -325,7 +332,7 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
         with open(f"{build_dir}/{VIVADO_BD_TCL}", "w", encoding="utf-8") as file:
             file.write("\n".join(tcl))
 
-        # export constraints
+        # export placement constraints
         if selector == SelectorEnum.NONE.name:
             tcl = []
         else:
