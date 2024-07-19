@@ -75,6 +75,7 @@ class NocGraph(BaseModel):
             assert e.src != e.dest, f"Invalid edge! {e.src.name} -> {e.dest.name}"
             self.add_edge(e)
 
+    # get node helper functions
     def get_all_nodes(self) -> list[str]:
         """Get a list of all nodes' names.
 
@@ -89,7 +90,7 @@ class NocGraph(BaseModel):
         all_nodes += [n.name for row in self.ncrb_nodes for n in row]
         all_nodes += [n.name for row in self.nps_hbm_nodes for n in row]
         all_nodes += [n.name for row in self.ncrb_hbm_nodes for n in row]
-        all_nodes += [p.name for row in self.hbm_mc_nodes for n in row for p in n]
+        all_nodes += [p.name for x in self.hbm_mc_nodes for n in x for p in n]
         all_nodes += [row.name for row in self.nmu_hbm_nodes]
         all_nodes += [row.name for row in self.nps4_hbm_mc_nodes]
         all_nodes += [n.name for row in self.nps6_hbm_mc_nodes for n in row]
@@ -127,6 +128,35 @@ class NocGraph(BaseModel):
         row_end = row_start + self.rows_per_slr[slr]
         return [self.nsu_nodes[col][r].name for r in range(row_start, row_end)]
 
+    def get_all_hbm_mc_nodes(self) -> list[str]:
+        """Get all HBM bank's port 0 and port 1 node names.
+
+        Returns a list of strings.
+        """
+        return [n.name for x in self.hbm_mc_nodes for pc in x for n in pc]
+
+    def get_hbm_mc_nodes(self, bank: int) -> list[str]:
+        """Get an HBM bank's port 0 and port 1 node names.
+
+        Returns a list of strings.
+        """
+        return [self.hbm_mc_nodes[bank // 2][bank % 2][p].name for p in range(2)]
+
+    def get_all_nmu_hbm_nodes(self) -> list[str]:
+        """Get a list of all NMU HBM nodes' names.
+
+        Returns a list of strings.
+        """
+        return [n.name for n in self.nmu_hbm_nodes]
+
+    def get_range_nmu_hbm_nodes(self, r: range) -> list[str]:
+        """Get a list of a range of NMU HBM nodes' names.
+
+        Returns a list of strings.
+        """
+        return [self.nmu_hbm_nodes[x].name for x in r]
+
+    # get edge helper functions
     def get_all_edges(self) -> list[tuple[str, str]]:
         """Get a list of all edges without attributes.
 
