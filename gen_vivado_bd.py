@@ -44,26 +44,34 @@ def dut_mmap_tcl(
     """
     tcl = []
     if hbm:
-        # if using regular NoC slave ports
-        # CONFIG.NUM_SI {{{len(mmap_ports)+8}}} \
+        num_hbm_nmu = sum(1 for v in mmap_ports.values() if v.get("noc") is None)
         tcl += [
             f"""
 startgroup
 
 set_property -dict [list \
-    CONFIG.NUM_HBM_BLI {{{len(mmap_ports)}}} \
+    CONFIG.NUM_HBM_BLI {{{num_hbm_nmu}}} \
+    CONFIG.NUM_SI {{{8 + len(mmap_ports) - num_hbm_nmu}}} \
     CONFIG.NUM_CLKS {{9}} \
     CONFIG.HBM_MEM_BACKDOOR_WRITE {{true}} \
     CONFIG.HBM_MEM_INIT_FILE {{{hbm_init_file}}} \
-] $noc_hbm_0
+] $axi_noc_dut
 """
         ]
 
-        # counters to even the usage of hbm ports of each bank
-        hbm_bank_cnt = {}
-        for i in range(32):
-            # initialize with CIPS connections
-            hbm_bank_cnt[i] = 1
+        # counters for each HBM PC to balance the usage of the HBM ports
+        # initialize with CIPS connections
+        def get_hbm_noc_port(bank: int) -> str:
+            # bank 0 = HBM PC 0 port 0 = port_idx 0
+            # bank 0 = HBM PC 0 port 1 = port_idx 1
+            # bank 1 = HBM PC 1 port 0 = port_idx 2
+            # bank 1 = HBM PC 1 port 1 = port_idx 3
+            port_idx = bank % 2 * 2 + hbm_bank_cnt[bank] % 2
+            # Note: hbm_bank_cnt is STATIC!
+            hbm_bank_cnt[bank] += 1
+            return f"HBM{bank // 2}_PORT{port_idx}"
+
+        hbm_bank_cnt = {i: 1 for i in range(32)}
     else:
         tcl += [
             f"""
@@ -83,65 +91,38 @@ set_property -dict [list \
 
     # Configure and connect mmap noc
     all_busif_ports = []
+    nmu_port_cnt = {"reg": 0, "hbm": 0}
     for i, (port, attr) in enumerate(mmap_ports.items()):
-        if hbm:
-            bank = attr["bank"]
-            port_idx = bank % 2 * 2 + hbm_bank_cnt[bank] % 2
-            hbm_bank_cnt[bank] += 1
-            hbm_port = f"HBM{bank // 2}_PORT{port_idx}"
-            # if using HBM NoC slave ports
-            noc_s_port = f"HBM{i:02d}_AXI"
-
-            # if using regular NoC slave ports with smartconnect
-            # noc_s_port = f"S{(i + 8):02d}_AXI"
-            #             tcl += [
-            #                 f"""
-            # create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 \
-            #     smartconnect_{i}
-            # set_property CONFIG.NUM_SI {{1}} [get_bd_cells smartconnect_{i}]
-            # connect_bd_intf_net [get_bd_intf_pins smartconnect_{i}/S00_AXI] \
-            #     [get_bd_intf_pins $dut/{port}]
-            # connect_bd_net [get_bd_pins smartconnect_{i}/aclk] \
-            #     [get_bd_pins clk_wizard_0/clk_out1]
-            # connect_bd_net [get_bd_pins smartconnect_{i}/aresetn] \
-            #     [get_bd_pins proc_sys_reset_0/peripheral_aresetn]
-            # connect_bd_intf_net [get_bd_intf_pins smartconnect_{i}/M00_AXI] \
-            #     [get_bd_intf_pins noc_hbm_0/HBM{i:02d}_AXI]
-            # """
-            #             ]
-
-            tcl += [
-                f"set_property -dict [list CONFIG.CONNECTIONS \
-                    {{{hbm_port} {{read_bw {{{attr['read_bw']}}} \
-                        write_bw {{{attr['write_bw']}}}}}}}] \
-                    [get_bd_intf_pins $noc_hbm_0/{noc_s_port}]"
-            ]
-
-            tcl += [
-                f"connect_bd_intf_net [get_bd_intf_pins $dut/{port}] \
-                    [get_bd_intf_pins $noc_hbm_0/{noc_s_port}]"
-            ]
+        if not hbm:
+            noc_s_port = f"S{i:02d}_AXI"  # DDR
+        # for HBM, mmap ports use dedicated HBM NMU nodes if attr["noc"] is not set
+        # else, use regular NMU nodes
+        elif attr.get("noc") is None:
+            noc_s_port = f"HBM{nmu_port_cnt['hbm']:02d}_AXI"  # HBM NMU
+            nmu_port_cnt["hbm"] += 1
         else:
-            noc_s_port = f"S{i:02d}_AXI"
-            tcl += [
-                f"set_property -dict [list CONFIG.CONNECTIONS \
-                    {{M00_INI {{read_bw {{{attr['read_bw']}}} \
-                        write_bw {{{attr['write_bw']}}}}}}}] \
-                    [get_bd_intf_pins /axi_noc_dut/{noc_s_port}]"
-            ]
+            noc_s_port = f"S{(nmu_port_cnt['reg'] + 8):02d}_AXI"  # regular NMU
+            nmu_port_cnt["reg"] += 1
 
-            tcl += [
-                f"connect_bd_intf_net [get_bd_intf_pins $dut/{port}] \
-                    [get_bd_intf_pins /axi_noc_dut/{noc_s_port}]"
-            ]
+        noc_m_port = get_hbm_noc_port(attr["bank"]) if hbm else "M00_INI"
 
+        tcl += [
+            f"""
+set_property -dict [list CONFIG.CONNECTIONS \
+    {{{noc_m_port} {{read_bw {{{attr['read_bw']}}} write_bw {{{attr['write_bw']}}}}}}}\
+] [get_bd_intf_pins /axi_noc_dut/{noc_s_port}]
+connect_bd_intf_net [get_bd_intf_pins $dut/{port}] \
+    [get_bd_intf_pins /axi_noc_dut/{noc_s_port}]
+"""
+        ]
         all_busif_ports.append(noc_s_port)
+
     s_busif_ports = ":".join(all_busif_ports)
 
     if hbm:
         tcl += [
             f"set_property -dict [list CONFIG.ASSOCIATED_BUSIF {{{s_busif_ports}}}] \
-                [get_bd_pins $noc_hbm_0/aclk8]"
+                [get_bd_pins /axi_noc_dut/aclk8]"
         ]
     else:
         tcl += [
@@ -348,9 +329,9 @@ connect_bd_net [get_bd_pins CIPS_0/pl0_ref_clk] [get_bd_ports pl0_ref_clk_0]
 connect_bd_net [get_bd_pins CIPS_0/pl0_resetn] [get_bd_ports pl0_resetn_0]
 
 # connect_bd_net [get_bd_pins clk_wizard_0/clk_out1] [get_bd_clk_pins $dut] \
-#     [get_bd_pins $noc_hbm_0/aclk8]
+#     [get_bd_pins $axi_noc_dut/aclk8]
 connect_bd_net [get_bd_pins CIPS_0/pl0_ref_clk] [get_bd_clk_pins $dut] \
-    [get_bd_pins $noc_hbm_0/aclk8]
+    [get_bd_pins $axi_noc_dut/aclk8]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_rst_pins $dut]
 connect_bd_intf_net [get_bd_intf_pins icn_ctrl/M01_AXI] \
     [get_bd_intf_pins dut_0/s_axi_control]
@@ -449,9 +430,11 @@ def gen_arm_bd_hbm(
 if __name__ == "__main__":
     import json
 
-    TEST_DIR = "/home/jakeke/AutoSA/cnn_out/20x14/build/cnn20x14_none"
-    TOP_MOD_NAME = "kernel0"
-    I_ADD_PIPELINE_JSON = "add_pipeline.json"
+    # manually set the following
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/serpens48_mmap"
+    TOP_MOD_NAME = "Serpens"
+    HBM_BD = True
+
     I_MMAP_PORT_JSON = "mmap_port.json"
     NOC_STREAM_ATTR_JSON = "noc_streams_attr.json"
     VIVADO_BD_TCL = "arm_bd.tcl"
@@ -464,7 +447,8 @@ if __name__ == "__main__":
     with open(f"{TEST_DIR}/{NOC_STREAM_ATTR_JSON}", "r", encoding="utf-8") as file:
         test_stream_attr = json.load(file)
 
-    arm_bd_tcl = gen_arm_bd_ddr(
+    worker = gen_arm_bd_hbm if HBM_BD else gen_arm_bd_ddr
+    arm_bd_tcl = worker(
         {
             "bd_name": BD_NAME,
             "top_mod": TOP_MOD_NAME,

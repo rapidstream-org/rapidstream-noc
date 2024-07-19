@@ -160,7 +160,7 @@ import_ips_from_dir {build_dir}/{rtl_dir}
 import_files {build_dir}/{rtl_dir}
 
 set_property SOURCE_SET sources_1 [get_filesets sim_1]
-add_files -fileset sim_1 -norecurse {tb_file}
+import_files -fileset sim_1 -norecurse {tb_file}
 set_property top tb [get_filesets sim_1]
 set_property top_lib xil_defaultlib [get_filesets sim_1]
 update_compile_order -fileset sim_1
@@ -282,7 +282,7 @@ if {{[llength $control_nsu_pblock] == 0}} {{
     resize_pblock {control_slot}_nsu -add {{{slot_nsu_nodes}}}
 }}
 add_cells_to_pblock {control_slot}_nsu \
-[get_cells */noc_hbm_0/inst/M00_AXI_nsu/*top_INST/NOC_NSU512_INST]
+[get_cells */axi_noc_dut/inst/M00_AXI_nsu/*top_INST/NOC_NSU512_INST]
 """
     ]
 

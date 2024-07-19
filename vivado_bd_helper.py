@@ -619,8 +619,8 @@ def arm_hbm_tcl(mmap_ports: dict[str, dict[str, int]], fpd: bool) -> list[str]:
     assert len(mmap_ports) <= NUM_HBM_CTRL, "Running out of HBM controllers!"
     tcl = [
         f"""
-# Create instance: noc_hbm_0, and set properties
-set noc_hbm_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 noc_hbm_0 ]
+# Create instance: axi_noc_dut, and set properties
+set axi_noc_dut [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 axi_noc_dut ]
 set_property -dict [list \
     CONFIG.HBM_NUM_CHNL {{{hbm_chnl}}} \
     CONFIG.NUM_CLKS {{9}} \
@@ -628,7 +628,7 @@ set_property -dict [list \
     CONFIG.NUM_MI {{{0 if fpd else 1}}} \
     CONFIG.NUM_SI {{8}} \
     CONFIG.NUM_NSI {{0}} \
-] $noc_hbm_0
+] $axi_noc_dut
 """
     ]
 
@@ -664,14 +664,14 @@ set_property -dict [list \
     HBM{attr["bank"] // 2}_PORT{(attr["bank"] % 2) * 2} {{read_bw {{5}} write_bw {{0}}\
     read_avg_burst {{4}} write_avg_burst {{4}}}}"""
                 ]
-        tcl += [f"}}] [get_bd_intf_pins $noc_hbm_0/{arm_s_axi}]"]
+        tcl += [f"}}] [get_bd_intf_pins $axi_noc_dut/{arm_s_axi}]"]
 
         # associate busif to clk
         tcl += [
             f"""
 set_property -dict [ list \
     CONFIG.ASSOCIATED_BUSIF {{{arm_s_axi}}} \
-] [get_bd_pins $noc_hbm_0/aclk{i}]
+] [get_bd_pins $axi_noc_dut/aclk{i}]
 """
         ]
 
@@ -679,32 +679,32 @@ set_property -dict [ list \
         """
 # Create interface connections
 connect_bd_intf_net -intf_net CIPS_0_FPD_AXI_NOC_0 \
-    [get_bd_intf_pins CIPS_0/FPD_AXI_NOC_0] [get_bd_intf_pins $noc_hbm_0/S04_AXI]
+    [get_bd_intf_pins CIPS_0/FPD_AXI_NOC_0] [get_bd_intf_pins $axi_noc_dut/S04_AXI]
 connect_bd_intf_net -intf_net CIPS_0_FPD_AXI_NOC_1 \
-    [get_bd_intf_pins CIPS_0/FPD_AXI_NOC_1] [get_bd_intf_pins $noc_hbm_0/S05_AXI]
+    [get_bd_intf_pins CIPS_0/FPD_AXI_NOC_1] [get_bd_intf_pins $axi_noc_dut/S05_AXI]
 connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_0 \
-    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_0] [get_bd_intf_pins $noc_hbm_0/S00_AXI]
+    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_0] [get_bd_intf_pins $axi_noc_dut/S00_AXI]
 connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_1 \
-    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_1] [get_bd_intf_pins $noc_hbm_0/S01_AXI]
+    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_1] [get_bd_intf_pins $axi_noc_dut/S01_AXI]
 connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_2 \
-    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_2] [get_bd_intf_pins $noc_hbm_0/S02_AXI]
+    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_2] [get_bd_intf_pins $axi_noc_dut/S02_AXI]
 connect_bd_intf_net -intf_net CIPS_0_FPD_CCI_NOC_3 \
-    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_3] [get_bd_intf_pins $noc_hbm_0/S03_AXI]
+    [get_bd_intf_pins CIPS_0/FPD_CCI_NOC_3] [get_bd_intf_pins $axi_noc_dut/S03_AXI]
 connect_bd_intf_net -intf_net CIPS_0_LPD_AXI_NOC_0 \
-    [get_bd_intf_pins CIPS_0/LPD_AXI_NOC_0] [get_bd_intf_pins $noc_hbm_0/S06_AXI]
+    [get_bd_intf_pins CIPS_0/LPD_AXI_NOC_0] [get_bd_intf_pins $axi_noc_dut/S06_AXI]
 connect_bd_intf_net -intf_net CIPS_0_PMC_NOC_AXI_0 \
-    [get_bd_intf_pins CIPS_0/PMC_NOC_AXI_0] [get_bd_intf_pins $noc_hbm_0/S07_AXI]
+    [get_bd_intf_pins CIPS_0/PMC_NOC_AXI_0] [get_bd_intf_pins $axi_noc_dut/S07_AXI]
 
 # Create port connections
-connect_bd_net [get_bd_pins CIPS_0/fpd_axi_noc_axi0_clk] [get_bd_pins $noc_hbm_0/aclk4]
-connect_bd_net [get_bd_pins CIPS_0/fpd_axi_noc_axi1_clk] [get_bd_pins $noc_hbm_0/aclk5]
-connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi0_clk] [get_bd_pins $noc_hbm_0/aclk0]
-connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi1_clk] [get_bd_pins $noc_hbm_0/aclk1]
-connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi2_clk] [get_bd_pins $noc_hbm_0/aclk2]
-connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi3_clk] [get_bd_pins $noc_hbm_0/aclk3]
-connect_bd_net [get_bd_pins CIPS_0/lpd_axi_noc_clk] [get_bd_pins $noc_hbm_0/aclk6]
+connect_bd_net [get_bd_pins CIPS_0/fpd_axi_noc_axi0_clk] [get_bd_pins $axi_noc_dut/aclk4]
+connect_bd_net [get_bd_pins CIPS_0/fpd_axi_noc_axi1_clk] [get_bd_pins $axi_noc_dut/aclk5]
+connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi0_clk] [get_bd_pins $axi_noc_dut/aclk0]
+connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi1_clk] [get_bd_pins $axi_noc_dut/aclk1]
+connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi2_clk] [get_bd_pins $axi_noc_dut/aclk2]
+connect_bd_net [get_bd_pins CIPS_0/fpd_cci_noc_axi3_clk] [get_bd_pins $axi_noc_dut/aclk3]
+connect_bd_net [get_bd_pins CIPS_0/lpd_axi_noc_clk] [get_bd_pins $axi_noc_dut/aclk6]
 connect_bd_net [get_bd_pins CIPS_0/pmc_axi_noc_axi0_clk] \
-    [get_bd_pins $noc_hbm_0/aclk7]
+    [get_bd_pins $axi_noc_dut/aclk7]
 """
     ]
 
@@ -712,8 +712,8 @@ connect_bd_net [get_bd_pins CIPS_0/pmc_axi_noc_axi0_clk] \
         tcl += [
             """
 connect_bd_intf_net -intf_net CIPS_0_M_AXI_GP0 \
-    [get_bd_intf_pins /noc_hbm_0/M00_AXI] [get_bd_intf_pins icn_ctrl/S00_AXI]
-set_property CONFIG.ASSOCIATED_BUSIF M00_AXI [get_bd_pins /noc_hbm_0/aclk8]
+    [get_bd_intf_pins /axi_noc_dut/M00_AXI] [get_bd_intf_pins icn_ctrl/S00_AXI]
+set_property CONFIG.ASSOCIATED_BUSIF M00_AXI [get_bd_pins /axi_noc_dut/aclk8]
 """
         ]
 
