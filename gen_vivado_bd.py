@@ -108,9 +108,10 @@ set_property -dict [list \
 
         tcl += [
             f"""
-set_property -dict [list CONFIG.CONNECTIONS \
-    {{{noc_m_port} {{read_bw {{{attr['read_bw']}}} write_bw {{{attr['write_bw']}}}}}}}\
-] [get_bd_intf_pins /axi_noc_dut/{noc_s_port}]
+set_property -dict [list CONFIG.CONNECTIONS {{{noc_m_port} {{ \
+    read_bw {{{attr['read_bw'] - 100}}} \
+    write_bw {{{attr['write_bw'] - 100}}} \
+}}}}] [get_bd_intf_pins /axi_noc_dut/{noc_s_port}]
 connect_bd_intf_net [get_bd_intf_pins $dut/{port}] \
     [get_bd_intf_pins /axi_noc_dut/{noc_s_port}]
 """
@@ -164,7 +165,7 @@ set_property CONFIG.ASSOCIATED_BUSIF [concat_axi_pins $axis_noc_dut] \
         tcl += [
             f"""
 set_property -dict [list CONFIG.CONNECTIONS {{{noc_m_port} \
-    {{ write_bw {{{float(attr["bandwidth"]) - 50}}} write_avg_burst {{4}}}}}}] \
+    {{ write_bw {{{float(attr["bandwidth"]) - 100}}} write_avg_burst {{4}}}}}}] \
 [get_bd_intf_pins /axis_noc_dut/{noc_s_port}]
 """
         ]
@@ -431,7 +432,7 @@ if __name__ == "__main__":
     import json
 
     # manually set the following
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/serpens48_mmap"
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/serpens48_mmap2"
     TOP_MOD_NAME = "Serpens"
     HBM_BD = True
 
