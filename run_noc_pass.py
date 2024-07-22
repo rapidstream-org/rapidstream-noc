@@ -35,7 +35,8 @@ from tcl_helper import (
     export_noc_constraint,
     gen_vivado_prj_tcl,
     parse_neg_paths,
-    print_noc_loc_tcl,
+    print_mmap_noc_loc_tcl,
+    print_stream_noc_loc_tcl,
 )
 from vh1582_nocgraph import vh1582_nocgraph
 from vp1802_nocgraph import vp1802_nocgraph
@@ -82,15 +83,14 @@ class SelectorEnum(Enum):
 @click.option(
     "--build-dir",
     default=None,
-    help="<Optional> Absolute path of build directory."
-    "If not specified, will not dump outputs.",
+    help="<Optional> Absolute path of build directory." "Required for --mmap-ilp.",
 )
 @click.option(
     "--top-mod-name",
     default=None,
-    help="<Optional> Top module name."
-    "Required if rapidstream_json has .xo file extension.",
+    help="<Optional> Top module name." "Required for --mmap-ilp or --rapidstream-json.",
 )
+@click.option("--mmap-ilp", is_flag=True, help="Runs MMAP port mapping ILP.")
 def parse_arguments(**kwargs: dict[str, Any]) -> dict[str, Any]:
     """Parse and validate command-line arguments.
 
@@ -101,10 +101,9 @@ def parse_arguments(**kwargs: dict[str, Any]) -> dict[str, Any]:
         raise click.BadParameter(
             "Either --rapidstream-json or --tapa-xo inputs is required."
         )
-    if (
-        kwargs["tapa_xo"]
-        and not kwargs["top_mod_name"]
-        and str(kwargs["selector"]) != SelectorEnum.NONE.name
+    if kwargs["tapa_xo"] and (
+        kwargs["top_mod_name"] is None
+        or str(kwargs["selector"]) != SelectorEnum.NONE.name
     ):
         raise click.BadParameter(
             "--top-mod-name and --selector NONE is required when using --tapa-xo."
@@ -113,6 +112,8 @@ def parse_arguments(**kwargs: dict[str, Any]) -> dict[str, Any]:
         raise click.BadParameter(
             "--top-mod-name should not be provided when using --rapidstream-json."
         )
+    if kwargs["mmap_ilp"] and str(kwargs["selector"]) != SelectorEnum.EMPTY.name:
+        raise click.BadParameter("--selector EMPTY is required when using --mmap-ilp.")
 
     return kwargs
 
@@ -127,9 +128,11 @@ if __name__ == "__main__":
     selector = args["selector"]
     build_dir = args["build_dir"]
     top_mod_name = args["top_mod_name"]
+    mmap_ilp = args["mmap_ilp"]
 
     # currently hard-coded parameters
     IMPL_FREQUENCY = "300.0"
+    # HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens48_mmap_nasa4704.mem"
     HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
     TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48.sv"
     USE_M_AXI_FPD = False
@@ -228,7 +231,9 @@ cp {mmap_port_json} {build_dir}/{I_MMAP_PORT_JSON}
             print(zsh_cmds)
             subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
-    # Select streams for NoC
+    # Select MMAP ports to put over NoC
+
+    # Select FIFOs to put over NoC
     if selector == SelectorEnum.NONE.name:
         streams_slots: dict[str, dict[str, str]] = {}
         noc_streams: list[str] = []
@@ -262,183 +267,188 @@ cp {mmap_port_json} {build_dir}/{I_MMAP_PORT_JSON}
     for s in noc_streams:
         print(f"{s}\t {streams_slots[s]}\t {streams_widths[s]}")
 
-    if build_dir:
-        # dumps the selected streams json
-        noc_stream_json = {GROUPED_MOD_NAME: noc_streams}
-        with open(
-            f"{build_dir}/{SELECTED_STREAMS_JSON}", "w", encoding="utf-8"
-        ) as file:
-            json.dump(noc_stream_json, file, indent=4)
+    # Dump outputs or
+    if not build_dir:
+        print("No build directory to dump outputs.")
+        sys.exit(1)
 
-        # generate grouped ir with the selected streams
-        cc_ret_noc_stream: dict[str, dict[str, str]] = {}
-        if selector == SelectorEnum.NONE.name:
-            # skip generating grouped ir and wrapper
-            zsh_cmds = f"""
+    # dumps the selected streams json
+    noc_stream_json = {GROUPED_MOD_NAME: noc_streams}
+    with open(f"{build_dir}/{SELECTED_STREAMS_JSON}", "w", encoding="utf-8") as file:
+        json.dump(noc_stream_json, file, indent=4)
+
+    # generate grouped ir with the selected streams
+    cc_ret_noc_stream: dict[str, dict[str, str]] = {}
+    if selector == SelectorEnum.NONE.name:
+        # skip generating grouped ir and wrapper
+        zsh_cmds = f"""
 unzip {tapa_xo} -d {build_dir}/tmp
 mv {build_dir}/tmp/ip_repo/*/src {build_dir}/rtl
 """
+    else:
+        if selector == SelectorEnum.EMPTY.name:
+            # skip generating grouped ir and wrapper
+            # but add dont_touch to pipelining registers
+            noc_pass_wrapper_ir = copy.deepcopy(rapidstream_ir)
+            add_dont_touch(noc_pass_wrapper_ir)
         else:
-            if selector == SelectorEnum.EMPTY.name:
-                # skip generating grouped ir and wrapper
-                # but add dont_touch to pipelining registers
-                noc_pass_wrapper_ir = copy.deepcopy(rapidstream_ir)
-                add_dont_touch(noc_pass_wrapper_ir)
-            else:
-                zsh_cmds = f"""
+            zsh_cmds = f"""
 source ~/.zshrc && amd
 rapidstream-optimizer -i {rapidstream_json} -o {build_dir}/{NOC_PASS_JSON} \
-    create-group-wrapper --group-name-to-insts-json={build_dir}/{SELECTED_STREAMS_JSON}
+create-group-wrapper --group-name-to-insts-json={build_dir}/{SELECTED_STREAMS_JSON}
 """
-                print(zsh_cmds)
-                subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+            print(zsh_cmds)
+            subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
-                # generate new rtl wrapper
-                with open(
-                    f"{build_dir}/{NOC_PASS_JSON}", "r", encoding="utf-8"
-                ) as file:
-                    noc_pass_ir = json.load(file)
+            # generate new rtl wrapper
+            with open(f"{build_dir}/{NOC_PASS_JSON}", "r", encoding="utf-8") as file:
+                noc_pass_ir = json.load(file)
 
-                noc_pass_wrapper_ir, cc_ret_noc_stream = noc_rtl_wrapper(
-                    noc_pass_ir, GROUPED_MOD_NAME
-                )
-                for s, attr in cc_ret_noc_stream.items():
-                    print(f'{s}\t {attr["width"]}\t {attr["bandwidth"]}')
+            noc_pass_wrapper_ir, cc_ret_noc_stream = noc_rtl_wrapper(
+                noc_pass_ir, GROUPED_MOD_NAME
+            )
+            for s, attr in cc_ret_noc_stream.items():
+                print(f'{s}\t {attr["width"]}\t {attr["bandwidth"]}')
 
-            with open(
-                f"{build_dir}/{NOC_PASS_WRAPPER_JSON}", "w", encoding="utf-8"
-            ) as file:
-                json.dump(noc_pass_wrapper_ir, file, indent=4)
+        with open(
+            f"{build_dir}/{NOC_PASS_WRAPPER_JSON}", "w", encoding="utf-8"
+        ) as file:
+            json.dump(noc_pass_wrapper_ir, file, indent=4)
 
-            zsh_cmds = f"""
+        zsh_cmds = f"""
 rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
 """
+    # generate rtl folder
+    print(zsh_cmds)
+    subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
-        # export noc IPI constraints
+    # export noc IPI constraints
+    tcl = []
+    if mmap_ilp:
+        # single site NoC constraint found by ILP
+        tcl = print_mmap_noc_loc_tcl(
+            [attr["noc"] for n, attr in mmap_port_ir.items() if attr["noc"] is not None]
+        )
+
+    if MULTI_SITE_NOC:
+        # multi-site NoC constraints
+        tcl = dump_streams_loc_tcl(
+            streams_slots | cc_ret_noc_stream,
+            noc_streams + list(cc_ret_noc_stream.keys()),
+            D,
+        )
+    elif selector == SelectorEnum.GRB.name:
+        # single site NoC constraint found by ILP
+        tcl = print_stream_noc_loc_tcl(node_loc)
+
+    with open(f"{build_dir}/{NOC_CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
+        file.write("\n".join(tcl))
+
+    # generate vivado bd tcl
+    bd_attr = {
+        "bd_name": BD_NAME,
+        "top_mod": top_mod_name,
+        "hbm_init_file": HBM_INIT_FILE,
+        "frequency": IMPL_FREQUENCY,
+    }
+
+    noc_stream_attr: dict[str, dict[str, str]] = {}
+    for s in noc_streams:
+        noc_stream_attr[f"m_axis_{s}"] = {
+            "dest": f"s_axis_{s}",
+            "bandwidth": str(streams_bw[s]),
+            "width": round_up_to_noc_tdata(str(streams_widths[s]), False),
+        }
+
+    for s, attr in cc_ret_noc_stream.items():
+        noc_stream_attr[f"m_axis_{s}"] = {
+            "dest": f"s_axis_{s}",
+            "bandwidth": attr["bandwidth"],
+            "width": attr["width"],
+        }
+    with open(f"{build_dir}/{NOC_STREAMS_ATTR}", "w", encoding="utf-8") as file:
+        json.dump(noc_stream_attr, file, indent=4)
+
+    if device_name == DeviceEnum.VP1802.name:
+        tcl = gen_arm_bd_ddr(
+            bd_attr=bd_attr,
+            mmap_ports=mmap_port_ir,
+            stream_attr=noc_stream_attr,
+            fpd=USE_M_AXI_FPD,
+        )
+    elif device_name == DeviceEnum.VH1582.name:
+        tcl = gen_arm_bd_hbm(
+            bd_attr=bd_attr,
+            mmap_ports=mmap_port_ir,
+            stream_attr=noc_stream_attr,
+            fpd=USE_M_AXI_FPD,
+        )
+    else:
+        raise NotImplementedError
+    with open(f"{build_dir}/{VIVADO_BD_TCL}", "w", encoding="utf-8") as file:
+        file.write("\n".join(tcl))
+
+    # export placement constraints
+    if selector == SelectorEnum.NONE.name:
         tcl = []
+    else:
+        final_ir = (
+            rapidstream_json
+            if selector == SelectorEnum.EMPTY.name
+            else f"{build_dir}/{NOC_PASS_WRAPPER_JSON}"
+        )
+        with open(final_ir, "r", encoding="utf-8") as file:
+            noc_pass_wrapper_ir = json.load(file)
+
+        floorplan = parse_floorplan(noc_pass_wrapper_ir, GROUPED_MOD_NAME)
+        print("Number of modules:", sum(len(v) for v in floorplan.values()))
+        print("Used slots: ", floorplan.keys())
+
+        tcl = export_constraint(floorplan, D)
+
+        # needed for multi-site NoC constraints
         if MULTI_SITE_NOC:
-            # multi-site NoC constraints
-            tcl = dump_streams_loc_tcl(
+            tcl += export_noc_constraint(
                 streams_slots | cc_ret_noc_stream,
                 noc_streams + list(cc_ret_noc_stream.keys()),
                 D,
             )
-        elif selector == SelectorEnum.GRB.name:
-            # single site NoC constraint found by ILP
-            tcl = print_noc_loc_tcl(node_loc)
 
-        with open(f"{build_dir}/{NOC_CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
-            file.write("\n".join(tcl))
+        if not USE_M_AXI_FPD:
+            tcl += export_control_s_axi_constraint(floorplan, D)
 
-        # generate rtl folder
-        print(zsh_cmds)
-        subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+    with open(f"{build_dir}/{CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
+        file.write("\n".join(tcl))
 
-        # generate vivado bd tcl
-        bd_attr = {
+    # generate vivado prj tcl
+    tcl = gen_vivado_prj_tcl(
+        {
+            "build_dir": build_dir,
+            "part_num": D.part_num,
+            "board_part": D.board_part,
             "bd_name": BD_NAME,
-            "top_mod": top_mod_name,
-            "hbm_init_file": HBM_INIT_FILE,
-            "frequency": IMPL_FREQUENCY,
+            "rtl_dir": RTL_FOLDER,
+            "tb_file": TB_FILE,
+            "constraint": CONSTRAINT_TCL,
+            "bd_tcl": VIVADO_BD_TCL,
+            "noc_tcl": NOC_CONSTRAINT_TCL,
         }
+    )
+    with open(f"{build_dir}/{VIVADO_PRJ_TCL}", "w", encoding="utf-8") as file:
+        file.write("\n".join(tcl))
 
-        noc_stream_attr: dict[str, dict[str, str]] = {}
-        for s in noc_streams:
-            noc_stream_attr[f"m_axis_{s}"] = {
-                "dest": f"s_axis_{s}",
-                "bandwidth": str(streams_bw[s]),
-                "width": round_up_to_noc_tdata(str(streams_widths[s]), False),
-            }
+    tcl = dump_neg_paths_summary(build_dir)
+    with open(f"{build_dir}/{DUMP_NEG_PATHS_TCL}", "w", encoding="utf-8") as file:
+        file.write("\n".join(tcl))
 
-        for s, attr in cc_ret_noc_stream.items():
-            noc_stream_attr[f"m_axis_{s}"] = {
-                "dest": f"s_axis_{s}",
-                "bandwidth": attr["bandwidth"],
-                "width": attr["width"],
-            }
-        with open(f"{build_dir}/{NOC_STREAMS_ATTR}", "w", encoding="utf-8") as file:
-            json.dump(noc_stream_attr, file, indent=4)
-
-        if device_name == DeviceEnum.VP1802.name:
-            tcl = gen_arm_bd_ddr(
-                bd_attr=bd_attr,
-                mmap_ports=mmap_port_ir,
-                stream_attr=noc_stream_attr,
-                fpd=USE_M_AXI_FPD,
-            )
-        elif device_name == DeviceEnum.VH1582.name:
-            tcl = gen_arm_bd_hbm(
-                bd_attr=bd_attr,
-                mmap_ports=mmap_port_ir,
-                stream_attr=noc_stream_attr,
-                fpd=USE_M_AXI_FPD,
-            )
-        else:
-            raise NotImplementedError
-        with open(f"{build_dir}/{VIVADO_BD_TCL}", "w", encoding="utf-8") as file:
-            file.write("\n".join(tcl))
-
-        # export placement constraints
-        if selector == SelectorEnum.NONE.name:
-            tcl = []
-        else:
-            final_ir = (
-                rapidstream_json
-                if selector == SelectorEnum.EMPTY.name
-                else f"{build_dir}/{NOC_PASS_WRAPPER_JSON}"
-            )
-            with open(final_ir, "r", encoding="utf-8") as file:
-                noc_pass_wrapper_ir = json.load(file)
-
-            floorplan = parse_floorplan(noc_pass_wrapper_ir, GROUPED_MOD_NAME)
-            print("Number of modules:", sum(len(v) for v in floorplan.values()))
-            print("Used slots: ", floorplan.keys())
-
-            tcl = export_constraint(floorplan, D)
-
-            # needed for multi-site NoC constraints
-            if MULTI_SITE_NOC:
-                tcl += export_noc_constraint(
-                    streams_slots | cc_ret_noc_stream,
-                    noc_streams + list(cc_ret_noc_stream.keys()),
-                    D,
-                )
-
-            if not USE_M_AXI_FPD:
-                tcl += export_control_s_axi_constraint(floorplan, D)
-
-        with open(f"{build_dir}/{CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
-            file.write("\n".join(tcl))
-
-        # generate vivado prj tcl
-        tcl = gen_vivado_prj_tcl(
-            {
-                "build_dir": build_dir,
-                "part_num": D.part_num,
-                "board_part": D.board_part,
-                "bd_name": BD_NAME,
-                "rtl_dir": RTL_FOLDER,
-                "tb_file": TB_FILE,
-                "constraint": CONSTRAINT_TCL,
-                "bd_tcl": VIVADO_BD_TCL,
-                "noc_tcl": NOC_CONSTRAINT_TCL,
-            }
-        )
-        with open(f"{build_dir}/{VIVADO_PRJ_TCL}", "w", encoding="utf-8") as file:
-            file.write("\n".join(tcl))
-
-        tcl = dump_neg_paths_summary(build_dir)
-        with open(f"{build_dir}/{DUMP_NEG_PATHS_TCL}", "w", encoding="utf-8") as file:
-            file.write("\n".join(tcl))
-
-        # launch vivado
-        zsh_cmds = f"""
+    # launch vivado
+    zsh_cmds = f"""
 source ~/.zshrc && amd
 cd {build_dir}
 vivado -mode batch -source {VIVADO_PRJ_TCL}
 vivado -mode batch -source {DUMP_NEG_PATHS_TCL}
 """
-        print(zsh_cmds)
-        subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+    print(zsh_cmds)
+    subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
-        parse_neg_paths(build_dir, list(streams_slots.keys()), noc_streams)
+    parse_neg_paths(build_dir, list(streams_slots.keys()), noc_streams)
