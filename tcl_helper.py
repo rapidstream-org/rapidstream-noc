@@ -12,23 +12,34 @@ from device import Device
 from ir_helper import extract_slot_coord, get_slot_nodes
 
 
-def print_noc_loc_tcl(node_loc: dict[str, tuple[str, str]]) -> list[str]:
-    """Prints the NMU and NSU location constraints in tcl."""
+def print_mmap_noc_loc_tcl(nmu_sites: list[str]) -> list[str]:
+    """Prints the MMAP NMU location constraints in tcl."""
+    tcl = []
+    for port_num, loc in enumerate(nmu_sites):
+        tcl += [
+            f"set_property -dict [list CONFIG.PHYSICAL_LOC {loc}] "
+            f"[get_bd_intf_pins /axi_noc_dut/S{str(port_num + 8).zfill(2)}_AXI]"
+        ]
+
+    print("\n".join(tcl))
+    return tcl
+
+
+def print_stream_noc_loc_tcl(node_loc: dict[str, tuple[str, str]]) -> list[str]:
+    """Prints the stream NMU and NSU location constraints in tcl."""
     tcl = []
     for port_num, (nmu_loc, nsu_loc) in enumerate(node_loc.values()):
         nmu_x, nmu_y = nmu_loc.split("x")[1].split("y")
         nsu_x, nsu_y = nsu_loc.split("x")[1].split("y")
         tcl += [
-            f"set_property -dict [list CONFIG.PHYSICAL_LOC "
+            "set_property -dict [list CONFIG.PHYSICAL_LOC "
             f"{{NOC_NMU512_X{nmu_x}Y{nmu_y}}}] "
-            f"[get_bd_intf_pins /axis_noc_dut/S{str(port_num).zfill(2)}"
-            "_AXIS]"
+            f"[get_bd_intf_pins /axis_noc_dut/S{str(port_num).zfill(2)}_AXIS]"
         ]
         tcl += [
-            f"set_property -dict [list CONFIG.PHYSICAL_LOC "
+            "set_property -dict [list CONFIG.PHYSICAL_LOC "
             f"{{NOC_NSU512_X{nsu_x}Y{nsu_y}}}] "
-            f"[get_bd_intf_pins /axis_noc_dut/M{str(port_num).zfill(2)}"
-            "_AXIS]"
+            f"[get_bd_intf_pins /axis_noc_dut/M{str(port_num).zfill(2)}_AXIS]"
         ]
     print("\n".join(tcl))
     return tcl

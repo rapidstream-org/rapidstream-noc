@@ -20,7 +20,7 @@ from ir_helper import (
     get_slot_to_noc_nodes,
     round_up_to_noc_bw,
 )
-from tcl_helper import print_noc_loc_tcl
+from tcl_helper import print_stream_noc_loc_tcl
 
 
 class NocUsage(BaseModel):
@@ -328,7 +328,7 @@ def ilp_noc_selector_add_constr(
                 == 0
             )
 
-        # src has only one incoming flow
+        # dest has only one incoming flow
         for n in end_nodes["dest"]:
             m += (
                 lpSum(
@@ -436,20 +436,21 @@ def ilp_noc_selector_add_constr_special(
 def ilp_noc_selector_add_obj(
     m: LpProblem,
     ilp_var: dict[str, dict[str, LpVariable]],
+    streams_nodes: dict[str, dict[str, list[str]]],
     streams_bw: dict[str, float],
+    device: Device,
 ) -> None:
     """Adds objectives for the NoC selector ILP."""
-    # not used
-    # total_path_length = lpSum(
-    #     ilp_var[stream_name]["x"][e]
-    #     for stream_name, _ in streams_nodes.items()
-    #     for e in device.noc_graph.get_all_edges()
-    # )
+    total_path_length = lpSum(
+        ilp_var[stream_name]["x"][e]
+        for stream_name, _ in streams_nodes.items()
+        for e in device.noc_graph.get_all_edges()
+    )
     total_not_mapped_bandwidth = lpSum(
         bw * ilp_var[stream_name]["not_mapped_stream"]
         for stream_name, bw in streams_bw.items()
     )
-    m += total_not_mapped_bandwidth
+    m += total_not_mapped_bandwidth + 300 * total_path_length
 
 
 def post_process_noc_ilp(
@@ -497,7 +498,7 @@ def post_process_noc_ilp(
             print()
 
     # prints the tcl constraints for the selected NMU and NSU nodes
-    print_noc_loc_tcl(node_loc)
+    print_stream_noc_loc_tcl(node_loc)
 
     print(f"ILP has selected {len(noc_streams)} streams")
     return noc_streams, node_loc
@@ -529,13 +530,13 @@ def ilp_noc_selector(
 
     # Constraints
     ilp_noc_selector_add_constr(m, ilp_var, streams_nodes, streams_bw, device)
-    ilp_noc_selector_add_constr_special(m, ilp_var, streams_nodes, device)
+    # ilp_noc_selector_add_constr_special(m, ilp_var, streams_nodes, device)
 
     # Objective function
     streams_manhattan_bw = get_stream_manhattan_bw(streams_slots, streams_bw)
     # mypy bug: sees LpVariable as Any
     # declaring a new function and trick mypy to see ilp_var's values as LpVariable
-    ilp_noc_selector_add_obj(m, ilp_var, streams_manhattan_bw)
+    ilp_noc_selector_add_obj(m, ilp_var, streams_nodes, streams_manhattan_bw, device)
 
     m.solve(GUROBI_CMD(options=[("TimeLimit", 300)]))
 
