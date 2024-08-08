@@ -77,7 +77,7 @@ set_property -dict [list \
             f"""
 # Create mmap noc
 startgroup
-set axi_noc_dut [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 axi_noc_dut ]
+set axi_noc_dut [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.1 axi_noc_dut ]
 
 set_property -dict [list \
     CONFIG.NUM_CLKS {{1}} \
@@ -111,6 +111,10 @@ set_property -dict [list \
 set_property -dict [list CONFIG.CONNECTIONS {{{noc_m_port} {{ \
     read_bw {{{attr['read_bw'] - 100}}} \
     write_bw {{{attr['write_bw'] - 100}}} \
+    read_avg_burst {{8}} \
+    write_avg_burst {{8}} \\
+    # excl_group {{{'' if attr.get("noc") is None else i}}} \\
+    sep_rt_group {{{i}}} \\
 }}}}] [get_bd_intf_pins /axi_noc_dut/{noc_s_port}]
 connect_bd_intf_net [get_bd_intf_pins $dut/{port}] \
     [get_bd_intf_pins /axi_noc_dut/{noc_s_port}]
@@ -165,7 +169,7 @@ set_property CONFIG.ASSOCIATED_BUSIF [concat_axi_pins $axis_noc_dut] \
         tcl += [
             f"""
 set_property -dict [list CONFIG.CONNECTIONS {{{noc_m_port} \
-    {{ write_bw {{{float(attr["bandwidth"]) - 100}}} write_avg_burst {{4}}}}}}] \
+    {{ write_bw {{{float(attr["bandwidth"]) - 100}}} write_avg_burst {{8}}}}}}] \
 [get_bd_intf_pins /axis_noc_dut/{noc_s_port}]
 """
         ]
@@ -432,7 +436,7 @@ if __name__ == "__main__":
     import json
 
     # manually set the following
-    TEST_DIR = "/home/jakeke/rapidstream-noc/test/serpens48_mmap2"
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/serpens32_mmap"
     TOP_MOD_NAME = "Serpens"
     HBM_BD = True
 

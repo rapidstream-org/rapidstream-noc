@@ -57,7 +57,7 @@ def arm_ddr_tcl(fpd: bool) -> list[str]:
     tcl = [
         """
 # Create instance: cips_noc, and set properties
-set cips_noc [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 cips_noc ]
+set cips_noc [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.1 cips_noc ]
 set_property -dict [list \
     CONFIG.NUM_CLKS {9} \
     CONFIG.NUM_MI {0} \
@@ -234,7 +234,7 @@ set_property -dict [ list \
 
 # Create instance: noc_lpddr4_0, and set properties
 set noc_lpddr4_0 [ create_bd_cell -type ip \
-    -vlnv xilinx.com:ip:axi_noc:1.0 noc_lpddr4_0 ]
+    -vlnv xilinx.com:ip:axi_noc:1.1 noc_lpddr4_0 ]
 set_property -dict [list \
     CONFIG.CH0_LPDDR4_0_BOARD_INTERFACE {ch0_lpddr4_trip1} \
     CONFIG.CH1_LPDDR4_0_BOARD_INTERFACE {ch1_lpddr4_trip1} \
@@ -257,7 +257,7 @@ set_property -dict [ list \
 
 
 # Create instance: noc_lpddr4_1, and set properties
-set noc_lpddr4_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 noc_lpddr4_1]
+set noc_lpddr4_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.1 noc_lpddr4_1]
 set_property -dict [list \
     CONFIG.CH0_LPDDR4_0_BOARD_INTERFACE {ch0_lpddr4_trip2} \
     CONFIG.CH0_LPDDR4_1_BOARD_INTERFACE {ch0_lpddr4_trip3} \
@@ -620,7 +620,7 @@ def arm_hbm_tcl(mmap_ports: dict[str, dict[str, int]], fpd: bool) -> list[str]:
     tcl = [
         f"""
 # Create instance: axi_noc_dut, and set properties
-set axi_noc_dut [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.0 axi_noc_dut ]
+set axi_noc_dut [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_noc:1.1 axi_noc_dut ]
 set_property -dict [list \
     CONFIG.HBM_NUM_CHNL {{{hbm_chnl}}} \
     CONFIG.NUM_CLKS {{9}} \
