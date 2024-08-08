@@ -22,6 +22,7 @@ from ir_helper import (
     FREQUENCY,
     parse_floorplan,
     parse_inter_slot,
+    parse_mmap_noc,
     parse_top_mod,
     round_up_to_noc_tdata,
 )
@@ -112,8 +113,6 @@ def parse_arguments(**kwargs: dict[str, Any]) -> dict[str, Any]:
         raise click.BadParameter(
             "--top-mod-name should not be provided when using --rapidstream-json."
         )
-    if kwargs["mmap_ilp"] and str(kwargs["selector"]) != SelectorEnum.EMPTY.name:
-        raise click.BadParameter("--selector EMPTY is required when using --mmap-ilp.")
 
     return kwargs
 
@@ -132,9 +131,10 @@ if __name__ == "__main__":
 
     # currently hard-coded parameters
     IMPL_FREQUENCY = "300.0"
-    # HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens48_mmap_nasa4704.mem"
-    HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
-    TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48.sv"
+    HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens32_nasa4704.mem"
+    TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens32_tb.sv"
+    # HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
+    # TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48.sv"
     USE_M_AXI_FPD = False
     MULTI_SITE_NOC = False
 
@@ -257,7 +257,10 @@ cp {mmap_port_json} {build_dir}/{I_MMAP_PORT_JSON}
         elif selector == SelectorEnum.GREEDY.name:
             noc_streams = greedy_selector(streams_slots, D)
         elif selector == SelectorEnum.GRB.name:
-            noc_streams, node_loc = ilp_noc_selector(streams_slots, streams_bw, D)
+            mmap_noc, mmap_bw = parse_mmap_noc(mmap_port_ir)
+            noc_streams, node_loc = ilp_noc_selector(
+                streams_slots, streams_bw, mmap_noc, mmap_bw, D
+            )
         else:
             raise NotImplementedError
 
@@ -327,19 +330,19 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
     if mmap_ilp:
         # single site NoC constraint found by ILP
         tcl = print_mmap_noc_loc_tcl(
-            [attr["noc"] for n, attr in mmap_port_ir.items() if attr["noc"] is not None]
+            [attr["noc"] for n, attr in mmap_port_ir.items() if attr.get("noc")]
         )
 
     if MULTI_SITE_NOC:
         # multi-site NoC constraints
-        tcl = dump_streams_loc_tcl(
+        tcl += dump_streams_loc_tcl(
             streams_slots | cc_ret_noc_stream,
             noc_streams + list(cc_ret_noc_stream.keys()),
             D,
         )
     elif selector == SelectorEnum.GRB.name:
         # single site NoC constraint found by ILP
-        tcl = print_stream_noc_loc_tcl(node_loc)
+        tcl += print_stream_noc_loc_tcl(node_loc)
 
     with open(f"{build_dir}/{NOC_CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
         file.write("\n".join(tcl))

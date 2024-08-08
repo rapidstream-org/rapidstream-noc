@@ -205,6 +205,33 @@ def eval_id_expr(expr: list[dict[str, str]]) -> int:
     return int(eval(expr_str))
 
 
+def parse_mmap_noc(
+    mmap_ir: dict[str, dict[str, Any]],
+) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, float]]]:
+    """Parses the MMAP ports' src and dest NoC nodes from the MMAP IR.
+
+    Empty if no MMAP ports are mapped to the fabric NMU nodes.
+
+    Returns a dictionary.
+    """
+    mmap_noc = {}
+    mmap_bw = {}
+    for p, attr in mmap_ir.items():
+        if attr.get("noc") is not None:
+            mc_bank = attr["bank"]
+            nmu_x, nmu_y = extract_slot_coord(attr["noc"])
+            mmap_noc[p] = {
+                # whether using port 0 and port 1 likely makes no difference
+                "src": f"nmu_x{nmu_x}y{nmu_y}",
+                "dest": f"hbm_mc_x{mc_bank // 2}y0_pc{mc_bank % 2}_port0",
+            }
+            mmap_bw[p] = {
+                "read_bw": float(attr["read_bw"]),
+                "write_bw": float(attr["write_bw"]),
+            }
+    return mmap_noc, mmap_bw
+
+
 def parse_inter_slot(
     ir: dict[str, Any],
 ) -> tuple[dict[str, dict[str, str]], dict[str, int]]:

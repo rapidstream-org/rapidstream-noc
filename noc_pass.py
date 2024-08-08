@@ -15,12 +15,16 @@ from pydantic import BaseModel, ConfigDict
 
 from device import Device
 from ir_helper import (
+    FREQUENCY,
     extract_slot_coord,
     extract_slot_range,
     get_slot_to_noc_nodes,
+    parse_inter_slot,
+    parse_mmap_noc,
+    parse_top_mod,
     round_up_to_noc_bw,
 )
-from tcl_helper import print_stream_noc_loc_tcl
+from tcl_helper import print_mmap_noc_loc_tcl, print_stream_noc_loc_tcl
 
 
 class NocUsage(BaseModel):
@@ -69,12 +73,19 @@ def print_ordered_edges(edges: list[tuple[str, str]]) -> None:
     """
     graph = nx.DiGraph(edges)
 
+    # remove independent cycles in the selected edges
+    cycles = list(nx.simple_cycles(graph))
+    for cycle in cycles:
+        print(f"Found cycles: {cycle}")
+        for n in cycle:
+            graph.remove_node(n)
+
     try:
         ordered_nodes = list(nx.topological_sort(graph))
         print(" -> ".join(ordered_nodes))
         return
     except nx.NetworkXUnfeasible:
-        print("Graph contains a cycle or is invalid!")
+        print("The following edges contain a cycle or is invalid!")
         print(edges)
         return
 
@@ -192,9 +203,10 @@ def get_stream_manhattan_bw(
     {'s1': 5000.0, 's2': 96000.0}
     """
     streams_manhattan = get_stream_manhattan_dist(streams_slots)
+    streams_manhattan_bw = {}
     for stream_name, bw in streams_bw.items():
-        streams_bw[stream_name] = bw * streams_manhattan[stream_name]
-    return streams_bw
+        streams_manhattan_bw[stream_name] = bw * streams_manhattan[stream_name]
+    return streams_manhattan_bw
 
 
 def get_nx_graph_from_noc_graph(device: Device) -> nx.DiGraph:
@@ -217,7 +229,9 @@ def find_nx_shortest_path(device: Device, src: str, dest: str) -> None:
 
 
 def ilp_noc_selector_add_var(
-    streams_nodes: dict[str, dict[str, list[str]]], device: Device
+    streams_nodes: dict[str, dict[str, list[str]]],
+    mmap_noc: dict[str, dict[str, str]],
+    device: Device,
 ) -> dict[str, dict[str, LpVariable | dict[str | tuple[str, str], LpVariable]]]:
     """Adds ilp_var for the NoC selector ILP.
 
@@ -231,7 +245,10 @@ def ilp_noc_selector_add_var(
         ilp_var[stream_name] = {
             # binary ilp_var of all edges for each stream
             "x": {
-                e: LpVariable(name=f"x_{stream_name}_{e}", cat="Binary") for e in edges
+                e: LpVariable(
+                    name=f"x_{stream_name.replace('_', '')}_{e}", cat="Binary"
+                )
+                for e in edges
             },
             # binary variable to determine the src nmu node for each stream
             "y": {
@@ -248,14 +265,24 @@ def ilp_noc_selector_add_var(
                 name=f"not_mapped_{stream_name}", cat="Binary"
             ),
         }
+
+    for port, _ in mmap_noc.items():
+        ilp_var[port] = {
+            # binary ilp_var of all edges for each port
+            # to constrain the edge bandwidth capacity
+            "x": {e: LpVariable(name=f"x_{port}_{e}", cat="Binary") for e in edges},
+            "x_ret": {
+                e: LpVariable(name=f"x_ret_{port}_{e}", cat="Binary") for e in edges
+            },
+        }
     return ilp_var
 
 
-def ilp_noc_selector_add_constr(
+def ilp_noc_selector_add_stream_constr(
     m: LpProblem,
     ilp_var: dict[str, dict[str, LpVariable | dict[Any, LpVariable]]],
     streams_nodes: dict[str, dict[str, list[str]]],
-    streams_bw: dict[str, float],
+    mmap_noc: dict[str, dict[str, str]],
     device: Device,
 ) -> None:
     """Adds constraints for the NoC selector ILP."""
@@ -348,14 +375,11 @@ def ilp_noc_selector_add_constr(
 
     # 4. Unique source and destination constraints
     for node in device.noc_graph.get_all_nmu_nodes():
-        m += (
-            lpSum(
-                ilp_var[stream_name]["y"][node]
-                for stream_name, end_nodes in streams_nodes.items()
-                if node in end_nodes["src"]
-            )
-            <= 1
-        )
+        m += lpSum(
+            ilp_var[stream_name]["y"][node]
+            for stream_name, end_nodes in streams_nodes.items()
+            if node in end_nodes["src"]
+        ) <= 1 - lpSum(1 for _, end_node in mmap_noc.items() if node == end_node["src"])
 
     for node in device.noc_graph.get_all_nsu_nodes():
         m += (
@@ -367,6 +391,144 @@ def ilp_noc_selector_add_constr(
             <= 1
         )
 
+
+def ilp_noc_selector_add_mmap_constr(
+    m: LpProblem,
+    ilp_var: dict[str, dict[str, LpVariable | dict[Any, LpVariable]]],
+    mmap_noc: dict[str, dict[str, str]],
+    device: Device,
+) -> None:
+    """Adds MMAP ports' constraints for the NoC selector ILP."""
+    # create networkx graph for its helper functions
+    noc_nx_graph = get_nx_graph_from_noc_graph(device)
+
+    # 3. Flow conservation constraints for MMAP ports
+    for port, end_node in mmap_noc.items():
+        for node in noc_nx_graph.nodes():
+            if node not in (end_node["src"], end_node["dest"]):
+                # intermediate nodes have conserved flow
+                m += (
+                    lpSum(
+                        ilp_var[port]["x"][(u, node)]
+                        for u in noc_nx_graph.predecessors(node)
+                    )
+                    - lpSum(
+                        ilp_var[port]["x"][(node, v)]
+                        for v in noc_nx_graph.successors(node)
+                    )
+                    == 0
+                )
+
+                # return path
+                m += (
+                    lpSum(
+                        ilp_var[port]["x_ret"][(u, node)]
+                        for u in noc_nx_graph.predecessors(node)
+                    )
+                    - lpSum(
+                        ilp_var[port]["x_ret"][(node, v)]
+                        for v in noc_nx_graph.successors(node)
+                    )
+                    == 0
+                )
+
+                # each node is visited at most once
+                m += lpSum(
+                    ilp_var[port]["x"][(u, node)]
+                    for u in noc_nx_graph.predecessors(node)
+                ) + lpSum(
+                    ilp_var[port]["x"][(node, v)] for v in noc_nx_graph.successors(node)
+                ) <= (
+                    1 + 1
+                )
+
+                # return path
+                m += lpSum(
+                    ilp_var[port]["x_ret"][(u, node)]
+                    for u in noc_nx_graph.predecessors(node)
+                ) + lpSum(
+                    ilp_var[port]["x_ret"][(node, v)]
+                    for v in noc_nx_graph.successors(node)
+                ) <= (
+                    1 + 1
+                )
+
+            # forbid disconnected edge cycles
+            # may not be necessary
+
+        # src has only one outgoing flow
+        m += (
+            lpSum(
+                ilp_var[port]["x"][(end_node["src"], v)]
+                for v in noc_nx_graph.successors(end_node["src"])
+            )
+            == 1
+        )
+        m += (
+            lpSum(
+                ilp_var[port]["x"][(v, end_node["src"])]
+                for v in noc_nx_graph.predecessors(end_node["src"])
+            )
+            == 0
+        )
+
+        # return trip
+        m += (
+            lpSum(
+                ilp_var[port]["x_ret"][(end_node["dest"], v)]
+                for v in noc_nx_graph.successors(end_node["dest"])
+            )
+            == 1
+        )
+        m += (
+            lpSum(
+                ilp_var[port]["x_ret"][(v, end_node["dest"])]
+                for v in noc_nx_graph.predecessors(end_node["dest"])
+            )
+            == 0
+        )
+
+        # dest has only one incoming flow
+        m += (
+            lpSum(
+                ilp_var[port]["x"][(v, end_node["dest"])]
+                for v in noc_nx_graph.predecessors(end_node["dest"])
+            )
+            == 1
+        )
+        m += (
+            lpSum(
+                ilp_var[port]["x"][(end_node["dest"], v)]
+                for v in noc_nx_graph.successors(end_node["dest"])
+            )
+            == 0
+        )
+
+        # return trip
+        m += (
+            lpSum(
+                ilp_var[port]["x_ret"][(v, end_node["src"])]
+                for v in noc_nx_graph.predecessors(end_node["src"])
+            )
+            == 1
+        )
+        m += (
+            lpSum(
+                ilp_var[port]["x_ret"][(end_node["src"], v)]
+                for v in noc_nx_graph.successors(end_node["src"])
+            )
+            == 0
+        )
+
+
+def ilp_noc_selector_add_bw_constr(
+    m: LpProblem,
+    ilp_var: dict[str, dict[str, LpVariable | dict[Any, LpVariable]]],
+    streams_bw: dict[str, float],
+    mmap_bw: dict[str, dict[str, float]],
+    device: Device,
+) -> None:
+    """Adds NoC bandwidth constraints for the NoC selector ILP."""
     # 5. Bandwidth constraints
     for e in device.noc_graph.edges:
         e_tuple = (e.src.name, e.dest.name)
@@ -374,6 +536,13 @@ def ilp_noc_selector_add_constr(
             lpSum(
                 round_up_to_noc_bw(bw) * ilp_var[stream_name]["x"][e_tuple]
                 for stream_name, bw in streams_bw.items()
+            )
+            + lpSum(
+                (attr["read_bw"] / 16.0 + attr["write_bw"] * (1 / 16.0 + 1))
+                * ilp_var[port]["x"][e_tuple]
+                + (attr["read_bw"] + attr["write_bw"] / 16.0)
+                * ilp_var[port]["x_ret"][e_tuple]
+                for port, attr in mmap_bw.items()
             )
             <= e.bandwidth
         )
@@ -489,7 +658,7 @@ def post_process_noc_ilp(
             selected_edges = [
                 e for e, var in ilp_var[stream_name]["x"].items() if var.value() >= 1
             ]
-            print(stream_name)
+            print(stream_name, f"{selected_src} to {selected_dest}")
             print("optimizer shortest path:")
             print_ordered_edges(selected_edges)
 
@@ -504,9 +673,37 @@ def post_process_noc_ilp(
     return noc_streams, node_loc
 
 
+def post_process_noc_ilp_mmap(
+    ilp_var: dict[str, dict[str, LpVariable | dict[Any, LpVariable]]],
+    mmap_noc: dict[str, dict[str, str]],
+) -> None:
+    """Prints the MMAP ports' paths.
+
+    Returns None.
+    """
+    noc_streams = []
+
+    for port, end_node in mmap_noc.items():
+        noc_streams.append(port)
+        selected_edges = [
+            e for e, var in ilp_var[port]["x"].items() if var.value() >= 1
+        ]
+        selected_ret_edges = [
+            e for e, var in ilp_var[port]["x_ret"].items() if var.value() >= 1
+        ]
+        print(port, f"{end_node['src']} to {end_node['dest']}")
+        print("optimizer shortest FORWARD path:")
+        print_ordered_edges(selected_edges)
+        print("optimizer shortest RETURN path:")
+        print_ordered_edges(selected_ret_edges)
+        print()
+
+
 def ilp_noc_selector(
     streams_slots: dict[str, dict[str, str]],
     streams_bw: dict[str, float],
+    mmap_noc: dict[str, dict[str, str]],
+    mmap_bw: dict[str, dict[str, float]],
     device: Device,
 ) -> tuple[list[str], dict[str, tuple[str, str]]]:
     """Selects a subset of the streams to use NoC using ILP.
@@ -517,19 +714,23 @@ def ilp_noc_selector(
         streams_slots:  dictionary of the cross-slot stream's
                         "src" and "dest" slot ranges
         streams_bw:     dictionary of the cross-slot stream's bandwidth target
+        mmap_noc:       dictionary of the MMAP ports onto the NoC
+        mmap_bw:        dictionary of the MMAP ports' bandwidth target
         device:         Device class with slot attributes and NoC graph.
 
-    Returns a dict of selected streams to use NoC with their nodes.
+    Returns a dict of selected streams to use NoC with their node sites.
     """
     m = LpProblem("noc", LpMinimize)
 
     streams_nodes = get_slot_to_noc_nodes(streams_slots, device)
 
     # decision ilp_var
-    ilp_var = ilp_noc_selector_add_var(streams_nodes, device)
+    ilp_var = ilp_noc_selector_add_var(streams_nodes, mmap_noc, device)
 
     # Constraints
-    ilp_noc_selector_add_constr(m, ilp_var, streams_nodes, streams_bw, device)
+    ilp_noc_selector_add_stream_constr(m, ilp_var, streams_nodes, mmap_noc, device)
+    ilp_noc_selector_add_mmap_constr(m, ilp_var, mmap_noc, device)
+    ilp_noc_selector_add_bw_constr(m, ilp_var, streams_bw, mmap_bw, device)
     # ilp_noc_selector_add_constr_special(m, ilp_var, streams_nodes, device)
 
     # Objective function
@@ -541,71 +742,73 @@ def ilp_noc_selector(
     m.solve(GUROBI_CMD(options=[("TimeLimit", 300)]))
 
     # Post-solve operations
+    post_process_noc_ilp_mmap(ilp_var, mmap_noc)
     return post_process_noc_ilp(ilp_var, streams_nodes)
 
 
 # playground
 if __name__ == "__main__":
+    import json
+
     from vh1582_nocgraph import vh1582_nocgraph
 
-    test_G = vh1582_nocgraph()
-    test_D = Device(
-        part_num="",
-        board_part="",
+    TEST_DIR = "/home/jakeke/rapidstream-noc/test/tmp"
+    MULTI_SITE_NOC = False
+    MMAP_ILP = True
+    GROUPED_MOD_NAME = "axis_noc_if"
+    I_MMAP_PORT_JSON = "mmap_port.json"
+    SELECTED_STREAMS_JSON = "noc_streams.json"
+    NOC_CONSTRAINT_TCL = "noc_constraint.tcl"
+    I_ADD_PIPELINE_JSON = "add_pipeline.json"
+
+    G = vh1582_nocgraph()
+    D = Device(
+        part_num="PART_NUM",
+        board_part="BOARD_PART",
         slot_width=2,
         slot_height=2,
-        noc_graph=test_G,
+        noc_graph=G,
         nmu_per_slot=[],  # generated
         nsu_per_slot=[],  # generated
         cr_mapping=[
-            ["CLOCKREGION_X0Y0:CLOCKREGION_X4Y4", "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7"],
-            ["CLOCKREGION_X5Y0:CLOCKREGION_X9Y4", "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7"],
+            ["CLOCKREGION_X0Y1:CLOCKREGION_X4Y4", "CLOCKREGION_X0Y5:CLOCKREGION_X4Y7"],
+            ["CLOCKREGION_X5Y1:CLOCKREGION_X9Y4", "CLOCKREGION_X5Y5:CLOCKREGION_X9Y7"],
         ],
     )
-    test_streams_slots = {
-        "a1": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
-        "a2": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
-        "a3": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
-        "a4": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
-        "b1": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
-        "b2": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
-        "b3": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
-        "b4": {"src": "SLOT_X0Y1_TO_SLOT_X0Y1", "dest": "SLOT_X1Y1_TO_SLOT_X1Y1"},
-        "g1": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
-        "g2": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
-        "g3": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
-        "g4": {"src": "SLOT_X1Y1_TO_SLOT_X1Y1", "dest": "SLOT_X0Y1_TO_SLOT_X0Y1"},
-        "c1": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
-        "c2": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
-        "c3": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
-        "c4": {"src": "SLOT_X0Y0_TO_SLOT_X0Y0", "dest": "SLOT_X1Y0_TO_SLOT_X1Y0"},
-        "h1": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
-        "h2": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
-        "h3": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
-        "h4": {"src": "SLOT_X1Y0_TO_SLOT_X1Y0", "dest": "SLOT_X0Y0_TO_SLOT_X0Y0"},
-    }
-    test_streams_bw = {
-        "a1": 16000.0,
-        "a2": 16000.0,
-        "a3": 16000.0,
-        "a4": 16000.0,
-        "b1": 16000.0,
-        "b2": 16000.0,
-        "b3": 16000.0,
-        "b4": 16000.0,
-        "g1": 16000.0,
-        "g2": 16000.0,
-        "g3": 16000.0,
-        "g4": 16000.0,
-        "c1": 16000.0,
-        "c2": 16000.0,
-        "c3": 16000.0,
-        "c4": 16000.0,
-        "h1": 16000.0,
-        "h2": 16000.0,
-        "h3": 16000.0,
-        "h4": 16000.0,
-    }
-    test_selected = ilp_noc_selector(test_streams_slots, test_streams_bw, test_D)
-    print(test_selected)
-    assert len(test_selected) == len(test_streams_slots), "Test failed!"
+
+    with open(f"{TEST_DIR}/{I_MMAP_PORT_JSON}", "r", encoding="utf-8") as file:
+        mmap_port_ir = json.load(file)
+    with open(f"{TEST_DIR}/{I_ADD_PIPELINE_JSON}", "r", encoding="utf-8") as file:
+        t_design = json.load(file)
+
+    t_streams_slots, t_streams_widths = parse_inter_slot(parse_top_mod(t_design))
+    t_streams_bw = {t_s: w * FREQUENCY / 8 for t_s, w in t_streams_widths.items()}
+    for t_s, attr in t_streams_slots.items():
+        print(t_s, attr, t_streams_widths[t_s], t_streams_bw[t_s])
+    t_mmap_noc, t_mmap_bw = parse_mmap_noc(mmap_port_ir)
+
+    t_noc_streams, t_node_loc = ilp_noc_selector(
+        t_streams_slots, t_streams_bw, t_mmap_noc, t_mmap_bw, D
+    )
+    print("Number of inter-slot streams:", len(t_streams_slots))
+    print("Selected streams for NoC", t_noc_streams)
+    for t_s in t_noc_streams:
+        print(f"{t_s}\t {t_streams_slots[t_s]}\t {t_streams_widths[t_s]}")
+    # dumps the selected streams json
+    noc_stream_json = {GROUPED_MOD_NAME: t_noc_streams}
+    with open(f"{TEST_DIR}/{SELECTED_STREAMS_JSON}", "w", encoding="utf-8") as file:
+        json.dump(noc_stream_json, file, indent=4)
+
+    # export noc IPI constraints
+    tcl = []
+    if MMAP_ILP:
+        # single site NoC constraint found by ILP
+        tcl = print_mmap_noc_loc_tcl(
+            [attr["noc"] for n, attr in mmap_port_ir.items() if attr["noc"] is not None]
+        )
+
+    # single site NoC constraint found by ILP
+    tcl += print_stream_noc_loc_tcl(t_node_loc)
+
+    with open(f"{TEST_DIR}/{NOC_CONSTRAINT_TCL}", "w", encoding="utf-8") as file:
+        file.write("\n".join(tcl))
