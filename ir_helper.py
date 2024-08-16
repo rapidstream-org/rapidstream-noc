@@ -16,8 +16,10 @@ class IREnum(Enum):
     """Enums to parse Rapidstream NOC IR."""
 
     PIPELINE = "__rs_hs_pipeline"
-    REGION = "REGION"
+    REGION = "__REGION"
     BODY = "BODY"
+    PP_HEAD = "_PP_HEAD"
+    PP_TAIL = "_PP_TAIL"
     HEAD_REGION = "__HEAD_REGION"
     TAIL_REGION = "__TAIL_REGION"
     DATA_WIDTH = "DATA_WIDTH"
@@ -69,8 +71,7 @@ def round_up_to_noc_tdata(width: str, byte: bool) -> str:
     for b in sorted(VALID_TDATA_NUM_BYTES):
         if width_b < b:
             return str(b) if byte else str(b * 8)
-    assert width_b <= VALID_TDATA_NUM_BYTES[-1], f"width ({width}) is too large."
-    raise NotImplementedError
+    return str(width_b)
 
 
 def round_up_to_noc_bw(raw_bw: float) -> float:
@@ -244,28 +245,36 @@ def parse_inter_slot(
     Returns a dictionary of streams' slots
     and a dictionary of streams' data width.
     """
-    slots: dict[str, dict[str, str]] = {}
-    widths: dict[str, int] = {}
+    # slots: dict[str, dict[str, str]] = {}
+    src = {}
+    dest = {}
+    widths = {}
     for sub_mod in ir["submodules"]:
-        if sub_mod["module"] == IREnum.PIPELINE.value:
-            # a pipeline module with *_REGION parameters crosses slot boundaries
-            if any(IREnum.REGION.value in p["name"] for p in sub_mod["parameters"]):
-                name = sub_mod["name"]
-                slots[name] = {}
-                for p in sub_mod["parameters"]:
-                    if p["name"] == IREnum.HEAD_REGION.value:
-                        # removes quotations in p["expr"][0]["repr"]
-                        slots[name]["src"] = p["expr"][0]["repr"][1:-1]
-                    elif p["name"] == IREnum.TAIL_REGION.value:
-                        # removes quotations in p["expr"][0]["repr"]
-                        slots[name]["dest"] = p["expr"][0]["repr"][1:-1]
+        # a pipeline head instance ends with _PP_HEAD
+        # a pipeline tail instance ends with _PP_TAIL
+        name = sub_mod["name"]
+        if name.endswith(IREnum.PP_HEAD.value):
+            name = name.removesuffix(IREnum.PP_HEAD.value)
+            src[name] = find_repr(sub_mod["parameters"], IREnum.REGION.value).strip('"')
 
-                for p in sub_mod["parameters"]:
-                    if p["name"] == IREnum.DATA_WIDTH.value:
-                        # assumes that we are discarding the eot bit in streams
-                        data_width = eval_id_expr(p["expr"]) - 1
-                        break
-                widths[name] = data_width
+            data_width_expr = find_expr(sub_mod["parameters"], IREnum.DATA_WIDTH.value)
+            # assumes that we are discarding the eot bit in streams
+            data_width = eval_id_expr(data_width_expr) - 1
+            widths[name] = data_width
+        elif name.endswith(IREnum.PP_TAIL.value):
+            name = name.removesuffix(IREnum.PP_TAIL.value)
+            dest[name] = find_repr(sub_mod["parameters"], IREnum.REGION.value).strip(
+                '"'
+            )
+    assert len(src) == len(dest)
+    print(f"Found {len(src)} pipelines crossing slots.")
+
+    slots = {}
+    for inst, src_slot in src.items():
+        slots[inst] = {
+            "src": src_slot,
+            "dest": dest[inst],
+        }
 
     return slots, widths
 
@@ -290,20 +299,25 @@ def parse_floorplan(ir: dict[str, Any], grouped_mod_name: str) -> dict[str, list
             if sub_mod["floorplan_region"] is not None:
                 # regular module
                 insts[sub_mod_name] = sub_mod["floorplan_region"]
-            elif sub_mod["module"] in PIPELINE_MAPPING:
-                # pipeline module, needs to extract slot of each reg
-                mapped_name = PIPELINE_MAPPING[sub_mod["module"]]
-                body_level = find_repr(sub_mod["parameters"], IREnum.BODY_LEVEL.value)
-                insts[f"{sub_mod_name}/RS_{mapped_name}_PP_HEAD"] = find_repr(
-                    sub_mod["parameters"], IREnum.HEAD_REGION.value
-                ).strip('"')
-                insts[f"{sub_mod_name}/RS_{mapped_name}_PP_TAIL"] = find_repr(
-                    sub_mod["parameters"], IREnum.TAIL_REGION.value
-                ).strip('"')
-                for i in range(int(body_level)):
-                    insts[f"{sub_mod_name}/RS_{mapped_name}_PP_BODY_{i}"] = find_repr(
-                        sub_mod["parameters"], f"__BODY_{i}_REGION"
-                    ).strip('"')
+            elif region := find_repr(sub_mod["parameters"], IREnum.REGION.value):
+                insts[sub_mod_name] = region.strip('"')
+            else:
+                raise NotImplementedError
+            # previous rapidstream pipeline modules
+            # elif sub_mod["module"] in PIPELINE_MAPPING:
+            #     # pipeline module, needs to extract slot of each reg
+            #     mapped_name = PIPELINE_MAPPING[sub_mod["module"]]
+            #     body_level = find_repr(sub_mod["parameters"], IREnum.BODY_LEVEL.value)
+            #     insts[f"{sub_mod_name}/RS_{mapped_name}_PP_HEAD"] = find_repr(
+            #         sub_mod["parameters"], IREnum.HEAD_REGION.value
+            #     ).strip('"')
+            #     insts[f"{sub_mod_name}/RS_{mapped_name}_PP_TAIL"] = find_repr(
+            #         sub_mod["parameters"], IREnum.TAIL_REGION.value
+            #     ).strip('"')
+            #     for i in range(int(body_level)):
+            #         insts[f"{sub_mod_name}/RS_{mapped_name}_PP_BODY_{i}"] = find_repr(
+            #             sub_mod["parameters"], f"__BODY_{i}_REGION"
+            #         ).strip('"')
 
     # convert {instance: slot} to {slot: [instances]}
     floorplan: dict[str, list[str]] = {}

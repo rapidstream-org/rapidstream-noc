@@ -27,7 +27,20 @@ from ir_verilog import create_const_one_driver
 
 
 def add_dont_touch(ir: dict[str, Any]) -> None:
-    """Adds dont_touch to the pipelining BODY registers.
+    """Adds dont_touch to the top-level's pipelining registers.
+
+    Returns None.
+    """
+    top_ir = parse_top_mod(ir)
+    for mod in top_ir["submodules"]:
+        if any(IREnum.REGION.value in p["name"] for p in mod["parameters"]):
+            print(f"Add dont_touch to {mod['name']}")
+            module_name = mod["module"]
+            mod["module"] = '(* dont_touch = "true" *) ' + module_name
+
+
+def add_dont_touch_pp_grp(ir: dict[str, Any]) -> None:
+    """Adds dont_touch to the pipeline group module's BODY registers.
 
     Returns None.
     """

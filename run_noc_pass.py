@@ -132,9 +132,7 @@ if __name__ == "__main__":
     # currently hard-coded parameters
     IMPL_FREQUENCY = "300.0"
     HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens32_nasa4704.mem"
-    TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens32_tb.sv"
-    # HBM_INIT_FILE = "/home/jakeke/rapidstream-noc/test/serpens_hbm48_nasa4704.mem"
-    # TB_FILE = "/home/jakeke/rapidstream-noc/test/serpens_tb_a48.sv"
+    TB_FILE = "/home/jakeke/rapidstream-noc/test/jacobi2d_mem8_tb.sv"
     USE_M_AXI_FPD = False
     MULTI_SITE_NOC = False
 
@@ -291,6 +289,8 @@ mv {build_dir}/tmp/ip_repo/*/src {build_dir}/rtl
     else:
         if selector == SelectorEnum.EMPTY.name:
             # skip generating grouped ir and wrapper
+            # noc_pass_wrapper_ir = rapidstream_ir
+
             # but add dont_touch to pipelining registers
             noc_pass_wrapper_ir = copy.deepcopy(rapidstream_ir)
             add_dont_touch(noc_pass_wrapper_ir)

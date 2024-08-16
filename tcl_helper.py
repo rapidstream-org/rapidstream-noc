@@ -210,16 +210,19 @@ def export_constraint(floorplan: dict[str, list[str]], device: Device) -> list[s
 
     Returns a list of tcl commands.
     """
+    if device.part_num.startswith("xcvh1582"):
+        unused_clk_pin = "BP53"
+    elif device.part_num.startswith("xcvp1802"):
+        unused_clk_pin = "BT48"
+
     tcl = [
-        """
+        f"""
 # assign tb clk and reset to dummy pins for synthesis
-set_property PACKAGE_PIN BP53 [get_ports pl0_ref_clk_0]
+set_property PACKAGE_PIN {{{unused_clk_pin}}} [get_ports pl0_ref_clk_0]
 set_property IOSTANDARD LVDCI_15 [get_ports pl0_ref_clk_0]
-set_property PACKAGE_PIN BR53 [get_ports pl0_resetn_0]
-set_property IOSTANDARD LVDCI_15 [get_ports pl0_resetn_0]
 
 # Initialize an empty list to store undefined cells
-set undefined_cells {}
+set undefined_cells {{}}
 """
     ]
 
@@ -293,7 +296,7 @@ if {{[llength $control_nsu_pblock] == 0}} {{
     resize_pblock {control_slot}_nsu -add {{{slot_nsu_nodes}}}
 }}
 add_cells_to_pblock {control_slot}_nsu \
-[get_cells */axi_noc_dut/inst/M00_AXI_nsu/*top_INST/NOC_NSU512_INST]
+[get_cells */cips_noc/inst/M00_AXI_nsu/*top_INST/NOC_NSU512_INST]
 """
     ]
 
