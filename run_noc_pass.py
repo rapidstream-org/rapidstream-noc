@@ -84,7 +84,12 @@ class SelectorEnum(Enum):
 @click.option(
     "--build-dir",
     default=None,
-    help="<Optional> Absolute path of build directory." "Required for --mmap-ilp.",
+    help="<Optional> Absolute path of build directory.",
+)
+@click.option(
+    "--tar",
+    default=None,
+    help="<Optional> File name for the build directory tar." "Exclude '.tar.gz'.",
 )
 @click.option(
     "--top-mod-name",
@@ -97,6 +102,15 @@ def parse_arguments(**kwargs: dict[str, Any]) -> dict[str, Any]:
 
     Returns a dictionary containing the parsed command-line arguments.
     """
+
+    # Print all options that were used
+    print("Used options:")
+    for option, value in kwargs.items():
+        if value is not None:
+            print(f"{option}: {value}")
+
+    if kwargs["build_dir"] and kwargs["tar"]:
+        raise click.BadParameter("Choose either --build-dir or --tar.")
 
     if not kwargs["rapidstream_json"] and not kwargs["tapa_xo"]:
         raise click.BadParameter(
@@ -126,6 +140,7 @@ if __name__ == "__main__":
     mmap_port_json = args["mmap_port_json"]
     selector = args["selector"]
     build_dir = args["build_dir"]
+    tar = args["tar"]
     top_mod_name = args["top_mod_name"]
     mmap_ilp = args["mmap_ilp"]
 
@@ -211,23 +226,27 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError
 
+    if tar:
+        build_dir = tar
+        # build_dir = f"{os.getcwd()}/{tar}"
+
     if build_dir:
         if os.path.exists(build_dir):
             print(f"The folder '{build_dir}' already exists. Aborting.")
             sys.exit(1)
-        else:
-            zsh_cmds = f"""
+
+    zsh_cmds = f"""
 mkdir {build_dir}
 cp {mmap_port_json} {build_dir}/{I_MMAP_PORT_JSON}
 """
-            if rapidstream_json:
-                zsh_cmds += f"cp {rapidstream_json} {build_dir}/"
-            elif tapa_xo:
-                zsh_cmds += f"cp {tapa_xo} {build_dir}/"
-            else:
-                raise NotImplementedError
-            print(zsh_cmds)
-            subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+    if rapidstream_json:
+        zsh_cmds += f"cp {rapidstream_json} {build_dir}/"
+    elif tapa_xo:
+        zsh_cmds += f"cp {tapa_xo} {build_dir}/"
+    else:
+        raise NotImplementedError
+    print(zsh_cmds)
+    subprocess.run(["zsh", "-c", zsh_cmds], check=True)
 
     # Select MMAP ports to put over NoC
 
@@ -443,6 +462,14 @@ rapidstream-exporter -i {build_dir}/{NOC_PASS_WRAPPER_JSON} -f {build_dir}/rtl
     tcl = dump_neg_paths_summary(build_dir)
     with open(f"{build_dir}/{DUMP_NEG_PATHS_TCL}", "w", encoding="utf-8") as file:
         file.write("\n".join(tcl))
+
+    if tar:
+        zsh_cmds = f"tar -czf {build_dir}.tar.gz {build_dir}\n"
+        # delete the temporary tar directory
+        zsh_cmds += f"rm -rf {build_dir}\n"
+        print(zsh_cmds)
+        subprocess.run(["zsh", "-c", zsh_cmds], check=True)
+        sys.exit(1)
 
     # launch vivado
     zsh_cmds = f"""
